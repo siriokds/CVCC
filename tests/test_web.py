@@ -5,6 +5,7 @@ import http.client
 import json
 import io
 import zipfile
+import tempfile
 import os
 from pathlib import Path
 import unittest
@@ -86,6 +87,28 @@ class WebTests(unittest.TestCase):
             self.assertEqual(archive.read('square.bin'),(ROOT/'examples/functions/square.bin').read_bytes())
         files['square.bin']={'base64':'%%%'}
         self.assertEqual(self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})[0],400)
+
+    def test_workspace_save_conflict_and_binary_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'project'
+            def workspace(action, payload, **headers):
+                status, body=self.request('POST','/api/workspace/'+action,json.dumps(payload),{'Content-Type':'application/json',**headers})
+                return status,json.loads(body)
+            files={'main.cvc':'void setup(){} void loop(){waitFrame();}', 'data/pattern.bin':{'base64':'AAEC/w=='}}
+            status,project=workspace('create',{'path':str(path),'files':files})
+            self.assertEqual(status,200,project)
+            edited={**files,'main.cvc':files['main.cvc']+' // saved'}
+            status,saved=workspace('save',{'id':project['id'],'revision':project['revision'],'files':edited})
+            self.assertEqual(status,200,saved)
+            self.assertEqual((path/'main.cvc').read_text(),edited['main.cvc'])
+            self.assertEqual((path/'data/pattern.bin').read_bytes(),bytes([0,1,2,255]))
+            status,_=workspace('save',{'id':project['id'],'revision':project['revision'],'files':files})
+            self.assertEqual(status,409)
+            self.assertEqual((path/'main.cvc').read_text(),edited['main.cvc'])
+            status,_=workspace('open',{'kind':'local','path':str(path)},Origin='https://example.invalid')
+            self.assertEqual(status,403)
+            status,_=workspace('save',{'id':'expired','files':files,'revision':'old'})
+            self.assertEqual(status,409)
 
     def test_no_arbitrary_files_or_cross_origin(self):
         self.assertEqual(self.request('GET', '/../../.git/config')[0],404)

@@ -1,6 +1,7 @@
 (() => {
   const $=id=>document.getElementById(id);
   const editor=$('editor');
+  let workspace=null;
   const player=new CartridgePlayer($('screen'));
   let examples=[], current='square', currentFile='main.cvc', projectFiles={}, errorFile=null, busy=false, lastBuild=null, lastSource='', activeTab='diagnostics', errorLine=null;
   const outputs={diagnostics:'Pronto a compilare.',assembly:'Compila un programma per vedere il codice Z80.',basic:'Compila un programma per vedere il passaggio CVBasic.'};
@@ -15,14 +16,20 @@
     }
     return result+escape(source.slice(cursor))+'\n';
   }
-  function persist(){if(!Object.keys(projectFiles).length)return;if(typeof projectFiles[currentFile]==='string')projectFiles[currentFile]=editor.value;try{localStorage.setItem('cvcc-project-'+current,JSON.stringify(projectFiles));}catch{}}
+  function persist(){
+    if(!Object.keys(projectFiles).length)return;
+    if(typeof projectFiles[currentFile]==='string')projectFiles[currentFile]=editor.value;
+    let saved=true;
+    try{localStorage.setItem('cvcc-project-'+current,JSON.stringify(projectFiles));}catch{saved=false;}
+    workspace?.changed(saved);
+  }
   function projectText(){return JSON.stringify(projectFiles);}
   function updateEditor(){
     $('highlight').innerHTML=highlight(editor.value);
     const lines=editor.value.split('\n').length;
     $('line-numbers').textContent=Array.from({length:lines},(_,i)=>i+1).join('\n');
     $('source-lines').textContent=editor.readOnly?bytes(projectFiles[currentFile].base64).length+' byte · sola lettura':lines+' righe';
-    const dirty=!!lastBuild&&(current!==lastBuild.name||projectText()!==lastSource);
+    const dirty=!!lastBuild&&(current!==lastBuild.projectId||projectText()!==lastSource);
     $('dirty-mark').hidden=!dirty;
     if(dirty)$('preview-note').textContent='Modifiche da compilare. Il player mostra l’ultima ROM valida.';
     updateCursor();syncScroll();
@@ -65,9 +72,9 @@
     const nav=$('project-tree');nav.replaceChildren();
     for(const project of examples){
       const expanded=project.id===current&&!closedProjects.has(project.id);
-      const folder=treeButton(project.id,'folder',expanded);folder.classList.add('project-folder');
+      const folder=treeButton(project.label||project.id,'folder',expanded);folder.classList.add('project-folder');
       folder.addEventListener('click',()=>{
-        if(busy)return;
+        if(busy||workspace?.pending)return;
         if(project.id!==current){closedProjects.delete(project.id);choose(project.id);}
         else{if(closedProjects.has(current))closedProjects.delete(current);else closedProjects.add(current);renderTree();}
       });nav.append(folder);
@@ -91,7 +98,7 @@
           button.classList.add(node.file?'project-file':'directory');
           if(node.file&&node.path===currentFile){button.classList.add('active');button.setAttribute('aria-current','true');}
           button.addEventListener('click',()=>{
-            if(busy)return;
+            if(busy||workspace?.pending)return;
             if(node.file)chooseFile(node.path);
             else{if(open)foldersForProject().delete(node.path);else foldersForProject().add(node.path);renderTree();}
           });item.append(button);
@@ -113,12 +120,12 @@
     editor.value=rows.join('\n');
   }
   function chooseFile(name){
-    if(busy)return;persist();currentFile=name;revealFile(name);showFile();
-    $('current-name').textContent=current+'/'+name;$('file-select').value=name;
+    if(busy||workspace?.pending)return;persist();currentFile=name;revealFile(name);showFile();
+    $('current-name').textContent=(examples.find(p=>p.id===current)?.label||current)+'/'+name;$('file-select').value=name;
     editor.scrollTop=0;editor.scrollLeft=0;updateEditor();renderTree();
   }
-  function choose(id){
-    if(busy)return;persist();current=id;const project=examples.find(e=>e.id===id);
+  function choose(id,skipPersist=false){
+    if(busy||workspace?.pending)return;if(!skipPersist)persist();current=id;const project=examples.find(e=>e.id===id);
     projectFiles={...project.files};
     try{const draft=JSON.parse(localStorage.getItem('cvcc-project-'+id)||'null');
       if(draft){for(const name of Object.keys(projectFiles))if(typeof projectFiles[name]==='string'&&typeof draft[name]==='string')projectFiles[name]=draft[name];}
@@ -126,8 +133,8 @@
     }catch{}
     currentFile='main.cvc';closedProjects.delete(current);showFile();
     $('example-select').value=id;$('file-select').replaceChildren(...Object.keys(projectFiles).map(name=>new Option(name,name)));
-    $('current-name').textContent=id+'/main.cvc';$('file-select').value=currentFile;
-    editor.scrollTop=0;editor.scrollLeft=0;updateEditor();renderTree();
+    $('current-name').textContent=(project.label||id)+'/main.cvc';$('file-select').value=currentFile;
+    editor.scrollTop=0;editor.scrollLeft=0;workspace?.select(project);updateEditor();renderTree();
   }
   function output(tab=activeTab){
     activeTab=tab;$('output').textContent=outputs[tab];
@@ -166,8 +173,8 @@
     select.disabled=false;updateDownload();
   }
   async function compile(){
-    if(busy)return;busy=true;errorLine=null;persist();
-    const files={...projectFiles},source=JSON.stringify(files),name=current;
+    if(busy||workspace?.pending)return;busy=true;errorLine=null;persist();
+    const files={...projectFiles},source=JSON.stringify(files),name=(examples.find(p=>p.id===current)?.label||current).replace(/[^a-zA-Z0-9_-]/g,'-'),projectId=current;
     $('compile').disabled=true;$('compile-label').textContent='Compilazione…';
     $('build-duration').textContent='BUILD IN CORSO';$('build-dot').className='';$('status-text').textContent='Compilazione sul Mac…';
     outputs.diagnostics='→ Parsing Tree-sitter, controlli CVCC e compilazione della ROM…';output('diagnostics');
@@ -175,7 +182,7 @@
       const response=await fetch('/api/compile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files})});
       const result=await response.json();
       if(!response.ok){errorLine=result.line||null;errorFile=result.file||null;throw new Error(result.error||'Compilazione non riuscita.');}
-      lastBuild={...result,name};lastSource=source;
+      lastBuild={...result,name,projectId};lastSource=source;
       outputs.assembly=result.assembly;outputs.basic=result.basic;
       outputs.diagnostics=`✓ Parsing e controlli semantici superati\n✓ ROM assemblata con sjasmplus · ${result.rom_bytes.toLocaleString('it-IT')} byte\n✓ Build completata in ${(result.elapsed_ms/1000).toFixed(2)} s\n\nSHA-256  ${result.sha256}`;
       $('build-duration').textContent=(result.elapsed_ms/1000).toFixed(2)+' s';$('build-dot').className='success';
@@ -211,7 +218,7 @@
       editor.setRangeText('    ',start,end,'end');persist();updateEditor();
     }
   });
-  document.addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();void compile();}});
+  document.addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key==='Enter'&&!document.querySelector('dialog[open]')){event.preventDefault();void compile();}});
   $('file-select').addEventListener('change',()=>{if(busy){$('file-select').value=currentFile;return;}chooseFile($('file-select').value);});
   document.querySelectorAll('.output-tab').forEach(b=>b.addEventListener('click',()=>output(b.dataset.tab)));
   $('compile').addEventListener('click',compile);
@@ -219,7 +226,7 @@
   $('goto-error').addEventListener('click',()=>{if(!errorLine)return;if(errorFile&&Object.hasOwn(projectFiles,errorFile))chooseFile(errorFile);const lines=editor.value.split('\n');const start=lines.slice(0,errorLine-1).reduce((sum,line)=>sum+line.length+1,0);editor.focus();editor.setSelectionRange(start,start+(lines[errorLine-1]||'').length);editor.scrollTop=Math.max(0,(errorLine-4)*22);syncScroll();updateCursor();});
   $('save-source').addEventListener('click',()=>saveFile(currentFile.split('/').at(-1),editor.readOnly?bytes(projectFiles[currentFile].base64):editor.value,editor.readOnly?'application/octet-stream':'text/plain'));
   $('save-project').addEventListener('click',async()=>{
-    persist();const name=current;
+    persist();const name=(examples.find(p=>p.id===current)?.label||current).replace(/[^a-zA-Z0-9_-]/g,'-');
     try{const response=await fetch('/api/project-download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:projectFiles})});
       if(!response.ok)throw new Error((await response.json()).error);
       saveFile(name+'.zip',await response.arrayBuffer(),'application/zip');
@@ -231,6 +238,20 @@
   $('reset').addEventListener('click',()=>player.reset());
   $('sound').addEventListener('click',async()=>{try{const on=await player.sound();$('sound').innerHTML='♪ <span>Audio '+(on?'on':'off')+'</span>';}catch(error){outputs.diagnostics+='\nAudio: '+error.message;output('diagnostics');}});
   $('reference-button').addEventListener('click',()=>$('reference').showModal());$('close-reference').addEventListener('click',()=>$('reference').close());
+  workspace=new WorkspaceUI({
+    snapshot(){persist();return structuredClone(projectFiles);},
+    files(){return projectFiles;},
+    exampleFiles(){return examples.find(p=>p.id===current)?.files||{};},
+    busy(){return busy;},
+    open(project,discard){
+      persist();
+      if(discard){localStorage.removeItem('cvcc-project-'+project.id);localStorage.removeItem('cvcc-base-'+project.id);}
+      const index=examples.findIndex(p=>p.id===project.id);
+      if(index<0)examples.push(project);else examples[index]=project;
+      $('example-select').replaceChildren(...examples.map(p=>new Option(p.label||p.id,p.id)));
+      choose(project.id,true);
+    }
+  });
   fetch('/api/config').then(async response=>{if(!response.ok)throw new Error('Server non disponibile');return response.json();}).then(config=>{
     examples=config.examples;
     $('example-select').replaceChildren(...examples.map(project=>new Option(project.id,project.id)));

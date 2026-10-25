@@ -46,6 +46,7 @@ def read_project(directory):
         raise ValueError('Project requires main.cvc')
     files = {}
     for path in sorted(root.rglob('*')):
+        if any(part.startswith('.') for part in path.relative_to(root).parts): continue
         if path.suffix in ('.cvc', '.h') + BINARY_SUFFIXES and path.is_file():
             if not path.resolve().is_relative_to(root):
                 raise ValueError('Project symlink escapes project directory')

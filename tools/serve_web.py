@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 from urllib.parse import urlsplit
+from workspace_store import WorkspaceStore, Conflict
 from rom_exports import exports
 from project_source import read_project, validate_files, file_bytes
 
@@ -54,6 +55,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, dict(examples=examples, player_available=all((self.server.player / f).is_file() for f in ('core.js', 'core.wasm'))))
         files = {'/': ('index.html', 'text/html; charset=utf-8'),
                  '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
+                 '/workspace.js': ('workspace.js', 'text/javascript; charset=utf-8'),
                  '/style.css': ('style.css', 'text/css; charset=utf-8'),
                  '/player.js': ('player.js', 'text/javascript; charset=utf-8')}
         if route in files:
@@ -65,10 +67,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, path.read_bytes(), 'application/wasm' if path.suffix == '.wasm' else 'text/javascript')
         return self.send(404, {'error': 'Not found'})
 
+    def workspace_request(self, action):
+        if self.headers.get_content_type() != 'application/json':
+            return self.send(415, {'error': 'JSON required'})
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 2 * 1024 * 1024:
+                return self.send(413, {'error': 'Request too large'})
+            payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict): raise ValueError('Expected JSON object')
+            result = self.server.workspaces.dispatch(action, payload)
+            return self.send(200, result)
+        except Conflict as exc:
+            return self.send(409, {'error': str(exc)})
+        except KeyError:
+            return self.send(409, {'error': 'Sessione scaduta: riapri il progetto da Recenti. La bozza resta nel browser.'})
+        except (ValueError, OSError, TypeError) as exc:
+            return self.send(400, {'error': str(exc)})
+        except subprocess.TimeoutExpired:
+            return self.send(504, {'error': 'Operazione scaduta. Controlla la destinazione prima di riprovare.'})
+
     def do_POST(self):
         if not self.allowed():
             return self.send(403, {'error': 'Local origin required'})
         route = urlsplit(self.path).path
+        if route.startswith('/api/workspace/'):
+            return self.workspace_request(route.rsplit('/', 1)[-1])
         if route not in ('/api/compile', '/api/project-download'):
             return self.send(404, {'error': 'Not found'})
         if self.headers.get_content_type() != 'application/json':
@@ -93,6 +117,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,archive.getvalue(),'application/zip')
         if not BUILD_LOCK.acquire(blocking=False):
             return self.send(409, {'error': 'Another build is running'})
+        owns_build_lock = True
+        def finish(status, payload):
+            nonlocal owns_build_lock
+            # Release before the client sees completion and sends its next build.
+            if owns_build_lock:
+                BUILD_LOCK.release()
+                owns_build_lock = False
+            return self.send(status, payload)
         try:
             started = time.perf_counter()
             with tempfile.TemporaryDirectory(prefix='request-', dir=ROOT / '.work/web') as tmp:
@@ -106,12 +138,12 @@ class Handler(BaseHTTPRequestHandler):
                 if result.returncode:
                     message = (result.stderr or result.stdout).replace(str(project)+'/', '')
                     match = re.search(r'([^\n:]+\.(?:cvc|h)):(\d+):(\d+): error: (.+)', message)
-                    return self.send(422, dict(error=message.strip(), file=match[1] if match else None, line=int(match[2]) if match else None, column=int(match[3]) if match else None))
+                    return finish(422, dict(error=message.strip(), file=match[1] if match else None, line=int(match[2]) if match else None, column=int(match[3]) if match else None))
                 metadata = json.loads((out / 'build.json').read_text())
                 symbols = dict((name, int(address,16)) for name,address in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$', (out/'program.sym').read_text(), re.M))
                 rom = (out/'program.sg').read_bytes()
                 code_bytes = symbols.get('ROM_END', 0)
-                return self.send(200, dict(rom=base64.b64encode(rom).decode(),
+                return finish(200, dict(rom=base64.b64encode(rom).decode(),
                     exports=exports(rom, code_bytes),
                     basic=(out/'program.bas').read_text(), assembly=(out/'program.sj.asm').read_text(),
                     log=(out/'build.log').read_text(), elapsed_ms=round((time.perf_counter()-started)*1000),
@@ -119,11 +151,11 @@ class Handler(BaseHTTPRequestHandler):
                     ram_bytes=symbols.get('RAM_END',0)-symbols.get('RAM_START',0),
                     code_bytes=symbols.get('ROM_END',0)))
         except subprocess.TimeoutExpired:
-            self.send(504, {'error': 'Build timeout (30 seconds)'})
+            finish(504, {'error': 'Build timeout (30 seconds)'})
         except (OSError, ValueError) as exc:
-            self.send(500, {'error': str(exc)})
+            finish(500, {'error': str(exc)})
         finally:
-            BUILD_LOCK.release()
+            if owns_build_lock: BUILD_LOCK.release()
 
 
 def main():
@@ -144,6 +176,7 @@ def main():
         raise SystemExit('Build the frontend first: ./tools/build_frontend.sh')
     (ROOT/'.work/web').mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+    server.workspaces = WorkspaceStore()
     server.player = args.player_dist.resolve()
     server.project = args.project.resolve() if args.project else None
     server.local_example = args.local_example.resolve() if args.local_example else None
