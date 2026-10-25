@@ -511,7 +511,10 @@ static int compile(Compiler *c,TSNode root) {
     for(unsigned i=0;i<c->function_count;i++) {
         c->current_function=(int)i;
         fprintf(c->out,"cvcc_fn%u: PROCEDURE\n",i);
-        statement(c,c->functions[i].body,0); fputs("END\n",c->out);
+        statement(c,c->functions[i].body,0);
+        // CVBasic END may omit RET after a prior RETURN even when a later
+        // generated label is a live jump target. Always terminate explicitly.
+        fputs("RETURN\nEND\n",c->out);
     }
     for(unsigned i=0;i<c->function_count;i++) check_calls(c,i);
     for(unsigned i=0;i<c->count;i++) if(c->symbols[i].array && c->symbols[i].constant) {

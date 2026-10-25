@@ -220,6 +220,11 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('v2 = v2 + 1\n#v1 = 0\ncvcc_case0_1:',result.stdout)
         self.assertIn('GOTO cvcc_continue5',result.stdout)
 
+    def test_function_epilogue_after_switch_return(self):
+        result=self.compile('uint8_t state; void setup(){} void loop(){step();waitVBlank();} void step(){switch(state){case 0:state=1;break;default:return;}}')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('cvcc_break0:\nRETURN\nEND',result.stdout)
+
     def test_adapter_rejects_other_targets_and_banking(self):
         for source in ['SG1000: equ 0\nCVBASIC_BANK_SWITCHING: equ 0', 'SG1000: equ 1\nCVBASIC_BANK_SWITCHING: equ 1']:
             with self.assertRaises(ValueError):
@@ -295,6 +300,13 @@ class RomTests(unittest.TestCase):
         command(BUILD/'reference-cvbasic','--sg1000',dest/'program.bas',dest/'reference.asm',str(cvb)+'/')
         command('gasm80',dest/'reference.asm','-o',dest/'reference.sg')
         self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
+
+    def test_states_function_exit_has_ret(self):
+        dest=BUILD/'states'
+        command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'examples/states.cvc','--out-dir',dest)
+        symbols=dict((key,int(address,16)) for key,address in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$',(dest/'program.sym').read_text(),re.M))
+        rom=(dest/'program.sg').read_bytes()
+        self.assertEqual(rom[symbols['CVB_CVCC_BREAK0']],0xC9)  # RET, not sprite data.
 
     def test_happy_face_exact_upstream_rom(self):
         # Upstream artwork stays in ignored build output; nothing is vendored.

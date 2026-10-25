@@ -247,6 +247,12 @@ switch-driven state machine, with both fall-through and direct returns.
 
 ## Validation
 
+`states.cvc` completes repeated circuits on SG-1000 NTSC and SC-3000 PAL,
+with 1,450 checked frames per model confirming one pixel per VBlank. A ROM
+regression checks the helper exit contains RET: an explicit BASIC RETURN
+prevents CVBasic from omitting the epilogue after a return followed by a live
+branch label.
+
 `switch.cvc` checks word selectors, stacked labels, missing/default-in-the-middle
 cases, fall-through, nested switches, mixed loop/switch break and continue, and
 returns from setup, loop and helper functions. Differential assembly and
