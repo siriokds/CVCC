@@ -46,7 +46,7 @@ class FrontendTests(unittest.TestCase):
     def test_while_decrement_parentheses(self):
         result = self.compile('uint8_t n=3; void setup(){while(n>0){--n;}} void loop(){if((n)){n=(n+1);}waitFrame();}')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('WHILE v0 > 0\nv0 = v0 - 1\nWEND', result.stdout)
+        self.assertIn('WHILE v0 > 0\nv0 = v0 - 1\ncvcc_continue0:\nWEND', result.stdout)
 
     def test_large_rom_data_uses_bounded_lines(self):
         source = 'const uint8_t data[256]={' + ','.join(['255']*256) + '}; void setup(){} void loop(){}'
@@ -106,14 +106,22 @@ class FrontendTests(unittest.TestCase):
             'logical_not': 'uint8_t x; void setup(){if(!x){x=1;}} void loop(){}',
             'comparison_as_value': 'uint8_t x; void setup(){x=(x==1);} void loop(){}',
             'side_effect_expression': 'uint8_t x; void setup(){x=x++;} void loop(){}',
-            'compound_assignment': 'uint8_t x; void setup(){x+=1;} void loop(){}',
+            'compound_assignment': 'uint8_t x; void setup(){x*=2;} void loop(){}',
             'call_arity': 'void setup(){waitFrame(1);} void loop(){}',
             'unknown_call': 'void setup(){foo();} void loop(){}',
             'string_escape': r'void setup(){printAt(0,"hello\n");} void loop(){}',
             'prefixed_string': 'void setup(){printAt(0,u8"hi");} void loop(){}',
             'string_position': 'void setup(){printAt(768,"hi");} void loop(){}',
             'sprite_size': 'const uint8_t a[1]={0}; void setup(){defineSprite(0,1,a);} void loop(){}',
-            'for': 'void setup(){for(;;){}} void loop(){}',
+            'for_local': 'void setup(){for(uint8_t i=0;i<3;i++){}} void loop(){}',
+            'for_comma': 'uint8_t i; uint8_t j; void setup(){for(i=0,j=0;i<3;i++){}} void loop(){}',
+            'break_outside': 'void setup(){break;} void loop(){}',
+            'continue_outside': 'void setup(){} void loop(){continue;}',
+            'break_helper': 'void f(){break;} void setup(){while(1){f();}} void loop(){}',
+            'for_bad_update': 'uint8_t i; void setup(){for(i=0;i<3;i*2){}} void loop(){}',
+            'shift': 'uint8_t i; void setup(){i=i<<1;} void loop(){}',
+            'compound_rom': 'const uint8_t a[1]={0}; void setup(){a[0]|=1;} void loop(){}',
+            'compound_side_effect': 'uint8_t a[2]; uint8_t i; void setup(){a[i++]^=1;} void loop(){}',
             'preprocessor': '#define X 1\nvoid setup(){} void loop(){}',
             'constexpr_if': 'void setup(){if constexpr(1){}} void loop(){}',
             'condition_declaration': 'void setup(){if(uint8_t x=1){}} void loop(){}',
@@ -134,6 +142,14 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         for snippet in ['DIM #v4(3)', '#v4(v7) = #d1(v7)', 'GOSUB cvcc_fn3',
                         'DATA 6144,6400,65535', 'CONST #k2 = 6144', 'RETURN']:
+            self.assertIn(snippet, result.stdout)
+
+    def test_for_and_bitwise(self):
+        result = self.compile((ROOT / 'tests/fixtures/for_bitwise.cvc').read_text())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for snippet in ['WHILE #v0 <= 255', 'GOTO cvcc_continue5', 'GOTO cvcc_break5',
+                        'v9 = (NOT v7)', '#v10 = (NOT #v8)',
+                        'v11 = (1 OR (2 XOR (3 AND 4)))']:
             self.assertIn(snippet, result.stdout)
 
     def test_adapter_rejects_other_targets_and_banking(self):
@@ -167,6 +183,15 @@ class RomTests(unittest.TestCase):
         command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'tests/fixtures/functions_arrays.cvc', '--out-dir', dest)
         cvb = ROOT / '.work/deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', ROOT / 'tests/fixtures/functions_arrays.bas', dest / 'reference.asm', str(cvb) + '/')
+        command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
+        self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
+
+    def test_for_bitwise_rom(self):
+        dest = BUILD / 'for-bitwise'
+        command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'tests/fixtures/for_bitwise.cvc', '--out-dir', dest)
+        # Assemble the same CVBasic lowering with the independent assembler.
+        cvb = ROOT / '.work/deps/CVBasic'
+        command(BUILD / 'reference-cvbasic', '--sg1000', dest / 'program.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
 

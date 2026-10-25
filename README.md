@@ -143,8 +143,17 @@ errors, request origin checks and the static file allowlist. Set
   Scalar `const` declarations require a literal initializer.
   Uninitialized globals are zeroed by the pinned SG-1000 runtime before setup.
 - Decimal and hexadecimal literals in `0..65535`; `+`, `-`, unary minus,
-  parentheses, assignment, and standalone `++`/`--`.
-- `if`/`else` and `while`. Conditions use an integer value or one comparison:
+  parentheses, assignment, and standalone `++`/`--`. Bitwise `&`, `|`, `^`,
+  `~`, and compound assignments `+=`, `-=`, `&=`, `|=`, `^=` are supported.
+  Parentheses in generated BASIC preserve the source expression precedence.
+- `if`/`else`, `while`, and `for (init; condition; update)` with optional
+  clauses, nested loops, `break` and `continue`. Counters must be global; local
+  declarations and comma expressions in the header are not supported.
+  The condition is tested before each iteration; `continue` runs the for-update
+  before testing again, and `break` exits the innermost loop.
+  Unsigned counters wrap normally: use `uint16_t` for `i <= 255`, since a byte
+  counter wraps to zero and cannot terminate that condition.
+  Loops lower to WHILE plus labels to preserve these C-like control-flow rules. Conditions use an integer value or one comparison:
   `==`, `!=`, `<`, `>`, `<=`, `>=`.
 - One-dimensional byte/word RAM arrays (`uint16_t values[N];`) and ROM arrays
   (`const uint16_t values[N] = {...};`), accessed with `values[index]`.
@@ -162,7 +171,8 @@ semantics, including wraparound and truncation on assignment to a narrower type;
 Comparisons are supported only as conditions, not as numeric expression values.
 Strings currently exclude escapes and non-ASCII characters.
 
-Function parameters, return values, locals, unsupported types, pointers, short-circuit
+Shifts (`<<`, `>>`), function parameters, return values, locals, unsupported
+types, pointers, short-circuit
 operators, preprocessing, SFRs, events, banking and other constructs are rejected.
 Diagnostics contain source path and one-based line/column ranges (byte columns).
 Safety limits: 1 MiB source, 256 global symbols, 128 helper functions,
@@ -173,7 +183,17 @@ The `patrol.cvc` workbench example combines helper functions, indexed RAM byte
 arrays and a ROM word table with a 16-bit frame counter. Available RAM remains
 machine-dependent: the SG-1000 backend checks the total allocation at build time.
 
+The `masks.cvc` workbench example adds counted loops and AND/XOR masks to the
+moving formation. Bitwise operators operate on unsigned byte/word values using
+the backend's width rules; they do not provide short-circuit boolean evaluation.
+
 ## Validation
+
+`for_bitwise.cvc` checks the full 0..255 iteration range with a word counter,
+zero-iteration and descending loops, a changing bound, omitted clauses, nested
+break/continue, early return, byte wraparound, byte/word complement, precedence,
+compound array writes and masks. Its ROM passes Gasm80/sjasmplus differential
+assembly and 180-frame state checks on SG-1000 NTSC and SC-3000 PAL.
 
 `functions_arrays.cvc` is also compared byte-for-byte with a handwritten BASIC
 reference (stable variable names preserve CVBasic's hash-based RAM placement).

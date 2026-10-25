@@ -22,6 +22,7 @@ typedef struct {
     Function functions[128];
     unsigned function_count;
     unsigned char calls[128][128], visited[128];
+    unsigned loop_ids[64], loop_depth, next_loop;
     int current_function, failed;
 } Compiler;
 
@@ -170,11 +171,17 @@ static void expression(Compiler *c,TSNode n) {
         fputc('(',c->out); expression(c,child(n,0)); fputc(')',c->out);
     } else if (kind(n,"binary_expression")) {
         TSNode op=field(n,"operator");
-        if (!(equals(c,op,"+")||equals(c,op,"-"))) { error(c,op,"only + and - are supported in integer expressions"); return; }
+        const char *ops[]={"+","-","&","|","^"};
+        const char *basic[]={"+","-","AND","OR","XOR"};
+        const char *mapped=NULL;
+        for(unsigned i=0;i<5;i++) if(equals(c,op,ops[i])) mapped=basic[i];
+        if(!mapped) { error(c,op,"unsupported integer operator"); return; }
         fputc('(',c->out); expression(c,field(n,"left"));
-        fprintf(c->out," %c ",equals(c,op,"+")?'+':'-'); expression(c,field(n,"right")); fputc(')',c->out);
-    } else if (kind(n,"unary_expression") && equals(c,field(n,"operator"),"-")) {
-        fputs("-",c->out); expression(c,field(n,"argument"));
+        fprintf(c->out," %s ",mapped); expression(c,field(n,"right")); fputc(')',c->out);
+    } else if (kind(n,"unary_expression") && (equals(c,field(n,"operator"),"-") || equals(c,field(n,"operator"),"~"))) {
+        int complement=equals(c,field(n,"operator"),"~");
+        fputs(complement?"(NOT ":"-",c->out);
+        expression(c,field(n,"argument")); if(complement) fputc(')',c->out);
     } else error(c,n,"unsupported integer expression '%s'",ts_node_type(n));
 }
 
@@ -231,6 +238,30 @@ static void builtin(Compiler *c,TSNode n) {
         error(c,fn,"unsupported function call");
     }
 }
+/* Assignment indices cannot contain calls or updates, so compound lowering may
+   safely evaluate the same index twice. */
+static void effect(Compiler *c,TSNode e) {
+    if(c->failed || ts_node_is_null(e)) return;
+    if (kind(e,"assignment_expression") || kind(e,"update_expression")) {
+        int update=kind(e,"update_expression");
+        TSNode target=field(e,update?"argument":"left");
+        TSNode op=field(e,"operator");
+        const char *compound=NULL;
+        const char *ops[]={"+=","-=","&=","|=","^="};
+        const char *basic[]={"+","-","AND","OR","XOR"};
+        for(unsigned i=0;i<5;i++) if(equals(c,op,ops[i])) compound=basic[i];
+        if ((!update&&!equals(c,op,"=")&&!compound) || (update&&!equals(c,op,"++")&&!equals(c,op,"--"))) { error(c,op,"unsupported assignment operator"); return; }
+        if(!access(c,target,1)) return;
+        fputs(" = ",c->out);
+        if(update) { access(c,target,0); fprintf(c->out," %c 1",equals(c,op,"++")?'+':'-'); }
+        else if(compound) {
+            fputc('(',c->out); access(c,target,0); fprintf(c->out," %s ",compound);
+            expression(c,field(e,"right")); fputc(')',c->out);
+        } else expression(c,field(e,"right"));
+        fputc('\n',c->out);
+    } else if(kind(e,"call_expression")) builtin(c,e);
+    else error(c,e,"unsupported expression statement");
+}
 static void statement(Compiler *c,TSNode n,unsigned depth) {
     if (c->failed) return;
     if (depth>64) { error(c,n,"statement nesting exceeds 64"); return; }
@@ -239,18 +270,7 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
     } else if (kind(n,"expression_statement")) {
         if (!children(n)) return;
         TSNode e=child(n,0);
-        if (kind(e,"assignment_expression") || kind(e,"update_expression")) {
-            int update=kind(e,"update_expression");
-            TSNode target=field(e,update?"argument":"left");
-            TSNode op=field(e,"operator");
-            if ((!update&&!equals(c,op,"=")) || (update&&!equals(c,op,"++")&&!equals(c,op,"--"))) { error(c,op,"unsupported assignment operator"); return; }
-            if(!access(c,target,1)) return;
-            fputs(" = ",c->out);
-            if(update) { access(c,target,0); fprintf(c->out," %c 1",equals(c,op,"++")?'+':'-'); }
-            else expression(c,field(e,"right"));
-            fputc('\n',c->out);
-        } else if(kind(e,"call_expression")) builtin(c,e);
-        else error(c,e,"unsupported expression statement");
+        effect(c,e);
     } else if(kind(n,"if_statement")) {
         /* constexpr/consteval are not part of the supported language. */
         for(unsigned i=0;i<ts_node_child_count(n);i++) if(equals(c,ts_node_child(n,i),"constexpr")||equals(c,ts_node_child(n,i),"consteval")) { error(c,n,"compile-time if is unsupported"); return; }
@@ -259,9 +279,29 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
         TSNode alt=field(n,"alternative");
         if(!ts_node_is_null(alt)) { fputs("ELSE\n",c->out); statement(c,child(alt,0),depth+1); }
         fputs("END IF\n",c->out);
-    } else if(kind(n,"while_statement")) {
-        fputs("WHILE ",c->out); condition(c,field(n,"condition")); fputc('\n',c->out);
-        statement(c,field(n,"body"),depth+1); fputs("WEND\n",c->out);
+    } else if(kind(n,"while_statement") || kind(n,"for_statement")) {
+        int counted=kind(n,"for_statement");
+        if(c->loop_depth==64) { error(c,n,"loop nesting exceeds 64"); return; }
+        unsigned id=c->next_loop++;
+        if(counted) {
+            TSNode init=field(n,"initializer");
+            if(kind(init,"declaration")) { error(c,init,"for counters must be declared globally"); return; }
+            if(kind(init,"expression_statement")) init=child(init,0);
+            effect(c,init);
+        }
+        c->loop_ids[c->loop_depth++]=id;
+        fputs("WHILE ",c->out);
+        TSNode cond=field(n,"condition");
+        if(ts_node_is_null(cond)) fputs("1",c->out); else condition(c,cond);
+        fputc('\n',c->out);
+        statement(c,field(n,"body"),depth+1);
+        fprintf(c->out,"cvcc_continue%u:\n",id);
+        if(counted) effect(c,field(n,"update"));
+        fprintf(c->out,"WEND\ncvcc_break%u:\n",id);
+        c->loop_depth--;
+    } else if(kind(n,"break_statement") || kind(n,"continue_statement")) {
+        if(!c->loop_depth) { error(c,n,"break/continue require an enclosing loop"); return; }
+        fprintf(c->out,"GOTO cvcc_%s%u\n",kind(n,"break_statement")?"break":"continue",c->loop_ids[c->loop_depth-1]);
     } else if(kind(n,"return_statement")) {
         if(children(n)) { error(c,n,"void functions cannot return a value"); return; }
         fputs(c->current_function<0?"GOTO cvcc_main_loop\n":"RETURN\n",c->out);

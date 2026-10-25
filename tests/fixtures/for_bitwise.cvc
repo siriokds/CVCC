@@ -1,0 +1,52 @@
+uint16_t i;
+uint8_t j;
+uint16_t count;
+uint16_t sum;
+uint8_t nested;
+uint8_t skipped;
+uint8_t wrapped;
+uint8_t byteValue = 0xA5;
+uint16_t wordValue = 0xA55A;
+uint8_t complemented;
+uint16_t wordComplement;
+uint8_t precedence;
+uint8_t dynamicLimit = 4;
+uint8_t visits;
+uint8_t ticks;
+uint8_t data[3];
+
+void setup() {
+    // A word counter visits every byte value, including 255, then becomes 256.
+    for (i = 0; i <= 255; i++) { count++; sum += i; }
+    for (j = 5; j < 3; j++) { skipped++; }
+    for (j = 4; j > 0; j -= 2) { visits++; }
+    for (j = 0; j < dynamicLimit; ++j) { dynamicLimit--; visits++; }
+    for (i = 0; i < 3; i++) {
+        for (j = 0; j < 4; j++) {
+            if (j == 1) { continue; }
+            if (j == 3) { break; }
+            nested++;
+        }
+        data[i] = i;
+        data[i] |= 0x80;
+    }
+    wrapped = 254;
+    for (;;) { wrapped++; if (wrapped == 0) { break; } }
+    j = 0;
+    for (; j < 2;) { j++; continue; }
+    while (j > 0) { j--; if (j == 1) { continue; } break; }
+    complemented = ~byteValue;
+    wordComplement = ~wordValue;
+    byteValue &= 0x0F;
+    byteValue |= 0x80;
+    byteValue ^= 0x03;
+    wordValue = (wordValue & 0xFF00) | 0x12;
+    wordValue ^= 0x8001;
+    precedence = 1 | 2 ^ 3 & 4;
+    early();
+}
+void early() {
+    for (;;) { return; }
+    skipped = 99;
+}
+void loop() { ticks++; waitFrame(); }
