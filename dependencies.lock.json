@@ -1,0 +1,5 @@
+{
+  "tree-sitter": {"url": "https://github.com/tree-sitter/tree-sitter.git", "commit": "dfe770858e3cfd8e8b29a79ea17da390a6f60319"},
+  "tree-sitter-cpp": {"url": "https://github.com/tree-sitter/tree-sitter-cpp.git", "commit": "c009222808634c1014f82438d4883753516a2c24"},
+  "CVBasic": {"url": "https://github.com/nanochess/CVBasic.git", "commit": "fd70d3d33f24951605de9405fc0630855e79c819"}
+}
