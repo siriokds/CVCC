@@ -5,13 +5,17 @@ and SC-3000. The current prototype parses real C++ syntax with Tree-sitter,
 validates a small CVCC subset, and builds a ROM with **sjasmplus**:
 
 ```text
-source.cpp -> Tree-sitter C++ -> CVCC semantic checks -> generated CVBasic
+source.cvc -> Tree-sitter C++ -> CVCC semantic checks -> generated CVBasic
            -> unmodified CVBasic -> assembly adapter -> sjasmplus -> program.sg
 ```
 
 The generated BASIC is a temporary validation bridge. The intended architecture
 will connect the frontend directly to CVBasic's Z80 engine. CVCC is **not** a
 standard C/C++ compiler, and does not yet provide CVBasic feature parity.
+
+CVCC source files use the `.cvc` extension. The conventional project entry is
+`main.cvc`, containing `setup()` and `loop()`; the current CLI accepts an explicit
+source path. Parsing still uses the Tree-sitter C++ grammar.
 
 ## Phase 1 target: Air/Sea Attack
 
@@ -72,7 +76,7 @@ for name, dependency in json.loads(Path('dependencies.lock.json').read_text()).i
                     'checkout', '--detach', dependency['commit']], check=True)
 PY
 ./tools/build_frontend.sh
-python3 tools/build_rom.py examples/square.cpp --out-dir build/square
+python3 tools/build_rom.py examples/square.cvc --out-dir build/square
 ```
 
 Load `build/square/program.sg` in an SG-1000/SC-3000 emulator with the standard
@@ -84,7 +88,7 @@ Reassemble the saved assembly from its output directory with
 The frontend alone writes BASIC to stdout, with diagnostics on stderr:
 
 ```sh
-build/cvcc examples/counter.cpp > build/counter.bas
+build/cvcc examples/counter.cvc > build/counter.bas
 python3 tests/test_frontend.py
 ```
 

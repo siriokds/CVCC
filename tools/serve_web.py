@@ -42,7 +42,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, {'error': 'Local origin required'})
         route = urlsplit(self.path).path
         if route == '/api/config':
-            examples = [{'id': name, 'source': (ROOT / 'examples' / f'{name}.cpp').read_text()} for name in ('square', 'counter')]
+            examples = [{'id': name, 'source': (ROOT / 'examples' / f'{name}.cvc').read_text()} for name in ('square', 'counter')]
             return self.send(200, dict(examples=examples, player_available=all((self.server.player / f).is_file() for f in ('core.js', 'core.wasm'))))
         files = {'/': ('index.html', 'text/html; charset=utf-8'),
                  '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
@@ -80,13 +80,13 @@ class Handler(BaseHTTPRequestHandler):
             started = time.perf_counter()
             with tempfile.TemporaryDirectory(prefix='request-', dir=ROOT / '.work/web') as tmp:
                 work = Path(tmp)
-                path = work / 'sketch.cpp'
+                path = work / 'sketch.cvc'
                 path.write_text(source)
                 out = work / 'result'
                 result = subprocess.run([sys.executable, str(ROOT / 'tools/build_rom.py'), str(path), '--out-dir', str(out)], cwd=ROOT, capture_output=True, text=True, timeout=30)
                 if result.returncode:
-                    message = (result.stderr or result.stdout).replace(str(path), 'sketch.cpp')
-                    match = re.search(r'sketch.cpp:(\d+):(\d+): error: (.+)', message)
+                    message = (result.stderr or result.stdout).replace(str(path), 'sketch.cvc')
+                    match = re.search(r'sketch.cvc:(\d+):(\d+): error: (.+)', message)
                     return self.send(422, dict(error=message.strip(), line=int(match[1]) if match else None, column=int(match[2]) if match else None))
                 metadata = json.loads((out / 'build.json').read_text())
                 symbols = dict((name, int(address,16)) for name,address in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$', (out/'program.sym').read_text(), re.M))

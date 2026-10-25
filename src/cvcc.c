@@ -258,7 +258,7 @@ static int compile(Compiler *c,TSNode root) {
     return !c->failed;
 }
 int main(int argc,char **argv) {
-    if(argc!=2) { fprintf(stderr,"Usage: cvcc source.cpp > output.bas\nExperimental uint8_t SG-1000 frontend (not standard C++).\n"); return 2; }
+    if(argc!=2) { fprintf(stderr,"Usage: cvcc source.cvc > output.bas\nExperimental uint8_t SG-1000 frontend (not standard C++).\n"); return 2; }
     FILE *in=fopen(argv[1],"rb"); if(!in) { perror(argv[1]); return 1; }
     if(fseek(in,0,SEEK_END)||ftell(in)<0||ftell(in)>1024*1024) { fprintf(stderr,"source must be a seekable file of at most 1 MiB\n"); fclose(in); return 1; }
     long length=ftell(in); rewind(in);

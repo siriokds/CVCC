@@ -23,7 +23,7 @@ def command(*args, cwd=ROOT):
 class FrontendTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=BUILD)
-        self.path = Path(self.temp.name) / 'test.cpp'
+        self.path = Path(self.temp.name) / 'test.cvc'
 
     def tearDown(self):
         self.temp.cleanup()
@@ -33,7 +33,7 @@ class FrontendTests(unittest.TestCase):
         return subprocess.run([str(FRONTEND), str(self.path)], capture_output=True, text=True)
 
     def test_counter_golden(self):
-        result = self.compile((ROOT / 'examples/counter.cpp').read_text())
+        result = self.compile((ROOT / 'examples/counter.cvc').read_text())
         self.assertEqual(result.returncode, 0, result.stderr)
         output = '\n'.join(line for line in result.stdout.splitlines() if not line.startswith("'")) + '\n'
         self.assertEqual(output, (ROOT / 'tests/fixtures/counter.bas').read_text())
@@ -104,7 +104,7 @@ class FrontendTests(unittest.TestCase):
                 result = self.compile(source)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, '')
-                self.assertRegex(result.stderr, r'test.cpp:\d+:\d+: error:')
+                self.assertRegex(result.stderr, r'test.cvc:\d+:\d+: error:')
 
     def test_adapter_rejects_other_targets_and_banking(self):
         for source in ['SG1000: equ 0\nCVBASIC_BANK_SWITCHING: equ 0', 'SG1000: equ 1\nCVBASIC_BANK_SWITCHING: equ 1']:
@@ -126,7 +126,7 @@ class RomTests(unittest.TestCase):
 
     def test_counter_against_handwritten_basic(self):
         dest = BUILD / 'test-counter'
-        command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'examples/counter.cpp', '--out-dir', dest)
+        command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'examples/counter.cvc', '--out-dir', dest)
         cvb = ROOT / '.work/deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', ROOT / 'tests/fixtures/counter.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
@@ -139,10 +139,10 @@ class RomTests(unittest.TestCase):
         rows = re.findall(r'BITMAP "([.X]+)"', original)
         self.assertEqual(len(rows), 16)
         data = [int(row[a:a+8].replace('.', '0').replace('X', '1'), 2) for a in (0, 8) for row in rows]
-        source = (ROOT / 'examples/square.cpp').read_text()
+        source = (ROOT / 'examples/square.cvc').read_text()
         source = re.sub(r'const uint8_t square\[32\] = \{.*?\};', 'const uint8_t square[32] = {' + ','.join(map(str,data)) + '};', source, flags=re.S)
         source = source.replace('CVCC moving square', 'Happy face!')
-        path = BUILD / 'happy_face.cpp'
+        path = BUILD / 'happy_face.cvc'
         path.write_text(source)
         dest = BUILD / 'test-happy-face'
         command(sys.executable, ROOT / 'tools/build_rom.py', path, '--out-dir', dest)

@@ -22,7 +22,7 @@ class WebTests(unittest.TestCase):
             connection.close()
 
     def test_compile_real_rom(self):
-        source = (ROOT / 'examples/counter.cpp').read_text()
+        source = (ROOT / 'examples/counter.cvc').read_text()
         status, body = self.request('POST', '/api/compile', json.dumps({'source': source}), {'Content-Type':'application/json'})
         self.assertEqual(status, 200, body)
         result = json.loads(body)

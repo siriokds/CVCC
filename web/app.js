@@ -33,7 +33,7 @@
     if(examples.length&&editor.value)persist();
     current=id;let draft=null;try{draft=localStorage.getItem('cvcc-draft-'+id);}catch{}
     editor.value=draft??examples.find(e=>e.id===id).source;
-    $('current-name').textContent=id+'.cpp';$('example-select').value=id;document.querySelectorAll('.file').forEach(b=>b.classList.toggle('active',b.dataset.example===id));
+    $('current-name').textContent=id+'.cvc';$('example-select').value=id;document.querySelectorAll('.file').forEach(b=>b.classList.toggle('active',b.dataset.example===id));
     editor.scrollTop=0;editor.scrollLeft=0;updateEditor();
   }
   function output(tab=activeTab){
@@ -98,7 +98,7 @@
   $('compile').addEventListener('click',compile);
   $('example-select').addEventListener('change',()=>{if(busy){$('example-select').value=current;return;}choose($('example-select').value);});
   $('goto-error').addEventListener('click',()=>{if(!errorLine)return;const lines=editor.value.split('\n');const start=lines.slice(0,errorLine-1).reduce((sum,line)=>sum+line.length+1,0);editor.focus();editor.setSelectionRange(start,start+(lines[errorLine-1]||'').length);editor.scrollTop=Math.max(0,(errorLine-4)*22);syncScroll();updateCursor();});
-  $('save-source').addEventListener('click',()=>saveFile(current+'.cpp',editor.value,'text/plain'));
+  $('save-source').addEventListener('click',()=>saveFile(current+'.cvc',editor.value,'text/plain'));
   $('download').addEventListener('click',()=>{if(lastBuild)saveFile(lastBuild.name+'.sg',bytes(lastBuild.rom),'application/octet-stream');});
   $('pause').addEventListener('click',()=>{const paused=player.pause();$('pause-overlay').hidden=!paused;$('pause').innerHTML=paused?'▶ <span>Riprendi</span>':'Ⅱ <span>Pausa</span>';$('preview-state').textContent=paused?'IN PAUSA':'IN ESECUZIONE';$('preview-state').classList.toggle('live',!paused);});
   $('reset').addEventListener('click',()=>player.reset());
