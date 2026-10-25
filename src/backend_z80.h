@@ -9,6 +9,8 @@ static void zstmt(Compiler *,TSNode);
 static void zcall(Compiler *,TSNode);
 static void zbyteexpr(Compiler *,TSNode);
 static int zbytevalue(Compiler *,TSNode);
+
+#include "backend_banks.h"
 static void zname(Compiler *c,Symbol *s) {
     for(unsigned i=0;i<c->count;i++) if(s==&c->symbols[i]) { fprintf(c->out,"cvcc_var_%s",s->name); return; }
     fprintf(c->out,"cvcc_arg_%d_%s",c->current_function,s->name);
@@ -257,11 +259,11 @@ static void zcall(Compiler *c,TSNode n) {
     }
     if(equals(c,fn,"bankRead")) {
         zexpr(c,child(args,1));
-        fprintf(c->out," ld a,h\n and $3f\n or $80\n ld h,a\n ld a,%u\n ld ($%x),a\n ld l,(hl)\n ld h,0\n",zliteral(c,child(args,0)),cartridge->bank_register);return;
+        fprintf(c->out," ld a,%u\n call cvcc_bank_read\n",zliteral(c,child(args,0)));return;
     }
     if(equals(c,fn,"vramWriteBank")) {
         zexpr(c,child(args,0));
-        fprintf(c->out," ld a,%u\n ld ($%x),a\n ld de,%u\n ld bc,%u\n call cvcc_vram_write\n",zliteral(c,child(args,1)),cartridge->bank_register,0x8000+zliteral(c,child(args,2)),zliteral(c,child(args,3)));return;
+        fprintf(c->out," ld a,%u\n ld de,%u\n ld bc,%u\n call cvcc_vram_write_bank\n",zliteral(c,child(args,1)),0x8000+zliteral(c,child(args,2)),zliteral(c,child(args,3)));return;
     }
     if(equals(c,fn,"controllerRead")) {
         fprintf(c->out," ld a,%u\n call cvcc_controller_port\n",zliteral(c,child(args,0)));return;
@@ -356,7 +358,7 @@ static unsigned zstack(Compiler *c,TSNode n) {
         }
         if(2*children(args)>peak)peak=2*children(args);
         for(unsigned i=0;i<c->function_count;i++)if(equals(c,field(n,"function"),c->functions[i].name)) {
-            if(!zstack_function[i])zstack_function[i]=1+zstack(c,c->functions[i].body);
+            if(!zstack_function[i])zstack_function[i]=(c->functions[i].bank?5:1)+zstack(c,c->functions[i].body);
             unsigned need=1+zstack_function[i];if(need>peak)peak=need;
         }
         return peak;
@@ -375,7 +377,7 @@ static unsigned zstack(Compiler *c,TSNode n) {
 static int compile_z80(Compiler *c) {
     /* Track allocation arithmetically: sjasmplus wraps ORG at $10000.
        A wrapped RAM_END must never make an overflowing program look small. */
-    unsigned ram_bytes=4+8+128; /* counters/flags, VDP registers, sprite shadow */
+    unsigned ram_bytes=4+8+128+(cartridge->bank_register?1u:0u); /* counters/flags, VDP registers, sprite shadow */
     for(unsigned i=0;i<c->count;i++) {
         Symbol *s=&c->symbols[i];
         if(!s->constant)ram_bytes+=(unsigned)(s->array?s->size:1)*(s->word?2u:1u);
@@ -387,8 +389,9 @@ static int compile_z80(Compiler *c) {
     unsigned setup_stack=zstack(c,c->setup),loop_stack=zstack(c,c->loop);
     unsigned stack_bytes=32+(setup_stack>loop_stack?setup_stack:loop_stack);
     if(stack_bytes<256)stack_bytes=256;
+    if(cartridge->bank_register)fprintf(c->out," DEFINE CVCC_BANKED 1\nCVCC_BANK_REGISTER EQU $%x\n",cartridge->bank_register);
     fprintf(c->out,"; Cartridge: %s\nSTACK_TOP EQU $%x\n",cartridge->id,cartridge_ram_end() & 65535);
-    fputs("; Original CVCC backend, no CVBasic code or runtime.\n OUTPUT \"program.sg\"\n DEVICE NOSLOT64K\n ORG 0\n jp cvcc_start\n defs $38-$,0\n jp cvcc_irq\n defs $66-$,0\n retn\n INCLUDE \"sg1000.asm\"\ncvcc_setup:\n",c->out);
+    fputs("; Original CVCC backend, no CVBasic code or runtime.\n OUTPUT \"program.sg\"\n DEVICE NOSLOT64K\n ORG 0\n jp cvcc_start\n defs $38-$,0\n jp cvcc_irq\n defs $66-$,0\n retn\n INCLUDE \"sg1000.asm\"\n IFDEF CVCC_BANKED\n INCLUDE \"banking.asm\"\n ENDIF\ncvcc_setup:\n",c->out);
     for(unsigned i=0;i<c->count;i++) {
         Symbol *s=&c->symbols[i];if(!s->initialized||s->constant)continue;
         for(int j=0;j<(s->array?s->size:1);j++) {
@@ -397,7 +400,9 @@ static int compile_z80(Compiler *c) {
         }
     }
     zstmt(c,c->setup);fputs(" ret\ncvcc_loop:\n",c->out);zstmt(c,c->loop);fputs(" ret\n",c->out);
+    zbank_thunks(c);
     for(unsigned i=0;i<c->function_count;i++) {
+        if(c->functions[i].bank)continue;
         c->current_function=(int)i;fprintf(c->out,"cvcc_fn_%s:\n",c->functions[i].name);zstmt(c,c->functions[i].body);fputs(" ret\n",c->out);
     }
     c->current_function=-1;
@@ -420,12 +425,9 @@ static int compile_z80(Compiler *c) {
         for(unsigned j=0;j<c->functions[i].arity;j++){Symbol *s=&c->functions[i].params[j];zname(c,s);fprintf(c->out," EQU $\n ORG $+%d\n",s->word?2:1);}
     }
     fputs("cvcc_vblank EQU $\n ORG $+1\ncvcc_video_mode EQU $\n ORG $+1\ncvcc_flicker_enabled EQU $\n ORG $+1\ncvcc_sprite_rotation EQU $\n ORG $+1\ncvcc_registers EQU $\n ORG $+8\ncvcc_sprites EQU $\n ORG $+128\n",c->out);
+    if(cartridge->bank_register)fputs("cvcc_current_bank EQU $\n ORG $+1\n",c->out);
     fprintf(c->out,"RAM_END EQU RAM_START+%u\n",ram_bytes);
     fprintf(c->out,"STACK_BYTES EQU %u\nRAM_LIMIT EQU $%x\n ASSERT RAM_END+STACK_BYTES <= RAM_LIMIT ; globals, runtime and worst-case stack must fit physical RAM\n",stack_bytes,cartridge_ram_end());
-    if(cartridge->bank_register) {
-        fputs("; CVCC_DATA_BANKS\n",c->out);
-        for(unsigned bank=2;bank<cartridge_banks;bank++)
-            fprintf(c->out,"; Physical bank %u (empty unless supplied by the project)\n ORG $8000\n defs 16384,$ff\n",bank);
-    }
+    if(cartridge->bank_register)zbank_payloads(c);
     return !c->failed;
 }

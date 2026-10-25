@@ -1,6 +1,7 @@
-"""Project cartridge configuration and explicit 16 KiB data banks."""
+"""Project cartridge configuration and packaging of explicit 16 KiB banks."""
 import base64
 import json
+import re
 from pathlib import Path, PurePosixPath
 import subprocess
 from project_source import BINARY_SUFFIXES, LIMIT
@@ -59,12 +60,24 @@ def append_banks(work, profile, banks):
     if not profile['banked']:
         return published
     assembly = work / 'program.sj.asm'
-    prefix = assembly.read_text().split('; CVCC_DATA_BANKS\n')[0]
-    with assembly.open('w') as out:
-        out.write(prefix + '; CVCC_DATA_BANKS\n')
-        for bank in range(2, profile['bank_count']):
-            name = f'bank{bank}.bin'
-            (work / name).write_bytes(banks.get(bank, b'').ljust(16384, b'\xff'))
-            out.write(f'\n; Physical ROM bank {bank}; CPU window $8000-$BFFF\n ORG $8000\n INCBIN "{name}"\n')
-            published.append(name)
+    source = assembly.read_text()
+    count = re.search(r'^CVCC_BANK_COUNT EQU (\d+)$', source, re.M)
+    if not count:
+        raise ValueError('Missing compiler bank layout')
+    profile['bank_count'] = int(count[1])
+    profile['code_banks'] = [int(n) for n in re.findall(r'^; CVCC_CODE_BANK (\d+)$', source, re.M)]
+    conflicts = set(profile['code_banks']) & banks.keys()
+    if conflicts:
+        raise ValueError('Code and binary data share bank(s): '+', '.join(map(str, sorted(conflicts))))
+    for bank in range(2, profile['bank_count']):
+        if bank in profile['code_banks']:
+            continue
+        name = f'bank{bank}.bin'
+        (work / name).write_bytes(banks.get(bank, b'').ljust(16384, b'\xff'))
+        placeholder = f'; CVCC_DATA_BANK_{bank}\n defs 16384,$ff\n; CVCC_DATA_BANK_END_{bank}\n'
+        if source.count(placeholder) != 1:
+            raise ValueError(f'Missing or duplicated layout for data bank {bank}')
+        source = source.replace(placeholder, f' INCBIN "{name}"\n')
+        published.append(name)
+    assembly.write_text(source)
     return published

@@ -1,0 +1,18 @@
+// Cartridge: ASC16L. main, setup and loop stay in the fixed 32 KB.
+#include "graphics.h"
+#include "game/movement.h"
+
+uint16_t tick;
+
+void setup() {
+    defineSprite(0, 1, square);
+    printAt(34, "CVCC BANKED FUNCTIONS");
+    printAt(98, "MOVEMENT AND DRAWING: BANK 2");
+    printAt(130, "TRIANGLE MATH: BANK 3");
+}
+
+void loop() {
+    waitVBlank();
+    tick = advance(tick, 408);
+    drawPair(tick);
+}

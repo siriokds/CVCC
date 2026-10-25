@@ -73,6 +73,20 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status,422,body)
         self.assertNotIn('rom',json.loads(body))
 
+    def test_banked_function_project(self):
+        import sys
+        sys.path.insert(0,str(ROOT/'tools'))
+        from project_source import read_project
+        files=read_project(ROOT/'examples/banked-functions')
+        status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,200,body)
+        result=json.loads(body)
+        self.assertEqual(result['cartridge']['code_banks'],[2,3])
+        self.assertEqual(result['rom_bytes'],65536)
+        self.assertGreater(result['bank_code_bytes'],0)
+        self.assertEqual(result['exports'],[])
+        self.assertIn('cvcc_body_drawPair',result['assembly'])
+
     def test_diagnostics_no_rom(self):
         status, body = self.request('POST', '/api/compile', json.dumps({'source':'void setup(){noSuchCall();}\nvoid loop(){}'}), {'Content-Type':'application/json'})
         result = json.loads(body)

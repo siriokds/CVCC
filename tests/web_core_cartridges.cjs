@@ -6,7 +6,7 @@ const createCore = require(process.argv[2]);
   const core = await createCore({print:()=>{}, printErr:()=>{}});
   core._web_init();
   const cases = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-  let pass, fail;
+  let pass, fail, alternate;
   for (const item of cases) {
     const rom = fs.readFileSync(item.path), ptr = core._malloc(rom.length);
     try {
@@ -21,8 +21,18 @@ const createCore = require(process.argv[2]);
       const pixels = new Uint16Array(core.HEAPU8.buffer, core._web_pixels(), core._web_width()*core._web_height());
       assert.equal(new Set(pixels).size, 1, item.label+' solid diagnostic frame');
       if (item.label==='color2') pass=pixels[0];
+      else if (item.label==='color4') alternate=pixels[0];
       else if (item.label==='color6') { fail=pixels[0];assert.notEqual(fail,pass); }
-      else assert.equal(pixels[0],pass,item.label+' RAM/bank/VRAM diagnostic, reset '+reset);
+      else if(item.heartbeat) {
+        const seen=new Set();
+        for(let frame=0;frame<8;frame++) {
+          core._web_run();
+          const pixel=new Uint16Array(core.HEAPU8.buffer,core._web_pixels(),1)[0];
+          assert.ok(pixel===pass || pixel===alternate,item.label+' banked call diagnostic');
+          seen.add(pixel);
+        }
+        assert.equal(seen.size,2,item.label+' must keep returning and processing VBlank');
+      } else assert.equal(pixels[0],pass,item.label+' RAM/bank/VRAM diagnostic, reset '+reset);
     }
     console.log('PASS',item.label);
   }

@@ -48,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, {'error': 'Local origin required'})
         route = urlsplit(self.path).path
         if route == '/api/config':
-            examples = [{'id': name, 'files': read_project(ROOT / 'examples' / name)} for name in ('square', 'counter', 'patrol', 'masks', 'logic', 'states', 'functions', 'banks')]
+            examples = [{'id': name, 'files': read_project(ROOT / 'examples' / name)} for name in ('square', 'counter', 'patrol', 'masks', 'logic', 'states', 'functions', 'banks', 'banked-functions')]
             if self.server.local_example:
                 examples.append(dict(id=self.server.local_example.stem, files={'main.cvc':self.server.local_example.read_text()}, local=True))
             if self.server.project:
@@ -146,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
                 code_bytes = symbols.get('ROM_END', 0)
                 return finish(200, dict(rom=base64.b64encode(rom).decode(),
                     exports=exports(rom, code_bytes, backend=metadata["backend"], cartridge=metadata["cartridge"]),
-                    backend=metadata["backend"], cartridge=metadata["cartridge"], bank_data_bytes=metadata["bank_data_bytes"],
+                    backend=metadata["backend"], cartridge=metadata["cartridge"], bank_data_bytes=metadata["bank_data_bytes"], bank_code_bytes=metadata["bank_code_bytes"],
                     basic=(out/'program.bas').read_text() if metadata['backend']=='legacy' else '', assembly=(out/'program.sj.asm').read_text(),
                     log=(out/'build.log').read_text(), elapsed_ms=round((time.perf_counter()-started)*1000),
                     rom_bytes=metadata['rom_bytes'], sha256=metadata['rom_sha256'],

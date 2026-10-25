@@ -1,0 +1,60 @@
+uint16_t result;
+uint8_t fault;
+uint8_t ticks;
+uint8_t buffer[16];
+const uint8_t fixedTable[4] = {1, 2, 3, 4};
+
+// Each path resumes in its original bank, with HL's return value preserved.
+__bank(2)
+uint16_t leaf(uint16_t value) {
+    waitVBlank();  // IRQ while bank 2 executes must not change its mapping.
+    vramWriteBank(0x3000, 5, 0, 16);
+    vramRead(0x3000, buffer, 0, 16);
+    if (buffer[0] != 7 || buffer[15] != 7) { fault = 1; }
+    return value + bankRead(5, bankRead(5, 0));
+}
+
+__bank(3)
+uint16_t sameBank(uint16_t value) {
+    return value + 11;
+}
+
+__bank(4)
+uint16_t otherBank(uint16_t value) {
+    if (bankRead(5, 16383) == 7) { return value + 9; }
+    return 0;
+}
+
+uint16_t fixedBridge(uint16_t value) {
+    return otherBank(value) + fixedTable[0];
+}
+
+__bank(3)
+uint16_t middle(uint16_t value) {
+    return sameBank(leaf(value)) + fixedBridge(value);
+}
+
+__bank(4)
+uint16_t combine(uint16_t a, uint16_t b) {
+    return a + b;
+}
+
+__bank(3)
+uint8_t byteResult() { return 255; }
+
+__bank(2)
+void mark() { ticks++; }
+
+void setup() {
+    screenDisable();
+    result = combine(leaf(100), leaf(200));
+    if (result != 314 || byteResult() != 255) { fault = 1; }
+}
+
+void loop() {
+    result = middle(1000);
+    mark();
+    if (result != 2028 || fault) { vdpWrite(7, 6); }
+    else if (ticks & 1) { vdpWrite(7, 2); }
+    else { vdpWrite(7, 4); }
+}

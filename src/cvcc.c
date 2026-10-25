@@ -13,7 +13,8 @@
 extern const TSLanguage *tree_sitter_cpp(void);
 
 typedef struct { char name[64]; int array, size, initialized, word, constant; TSNode value; } Symbol;
-typedef struct { char name[64]; TSNode body, node; Symbol params[16]; unsigned arity; int result; } Function;
+typedef struct { char name[64]; TSNode body, node; Symbol params[16]; unsigned arity, bank; int result; } Function;
+typedef struct { size_t start, end; unsigned bank; int used; } BankTag;
 typedef struct {
     const char *path;
     char *source;
@@ -23,6 +24,7 @@ typedef struct {
     TSNode setup, loop;
     Function functions[128];
     unsigned function_count;
+    BankTag bank_tags[128]; unsigned bank_tag_count;
     TSNode temps[2048]; unsigned temp_bits[2048], temp_count;
     unsigned char calls[128][128], visited[128];
     unsigned loop_ids[64], loop_depth, break_ids[64], break_depth, next_loop, next_bool;
@@ -146,7 +148,10 @@ static void declare(Compiler *c,TSNode n) {
     strcpy(s->name,name); s->array=array; s->size=(int)size; s->value=val;
     s->initialized=!ts_node_is_null(val); s->word=word; s->constant=constant;
 }
+#include "bank_tags.h"
+
 static void function(Compiler *c,TSNode n) {
+    unsigned bank=function_bank(c,n);
     TSNode d=field(n,"declarator"), type=field(n,"type"), body=field(n,"body");
     if ((!equals(c,type,"void") && !equals(c,type,"uint8_t") && !equals(c,type,"uint16_t")) || !kind(d,"function_declarator") || !kind(body,"compound_statement") || children(n)!=3) {
         error(c,n,"functions must return void, uint8_t or uint16_t and have a body"); return;
@@ -156,6 +161,7 @@ static void function(Compiler *c,TSNode n) {
     if (equals(c,name,"setup")) slot=&c->setup;
     else if (equals(c,name,"loop")) slot=&c->loop;
     if (slot) {
+        if(bank) { error(c,n,"setup and loop must remain in fixed ROM; tag a helper function instead");return; }
         if(!equals(c,type,"void") || children(field(d,"parameters"))) { error(c,n,"entry points require void and no parameters"); return; }
         if (!ts_node_is_null(*slot)) { error(c,name,"duplicate entry point"); return; }
         *slot=body; return;
@@ -165,7 +171,7 @@ static void function(Compiler *c,TSNode n) {
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(id,reserved[i])) { error(c,name,"reserved builtin name"); return; }
     for(unsigned i=0;i<c->function_count;i++) if(!strcmp(id,c->functions[i].name)) { error(c,name,"duplicate function"); return; }
     if(c->function_count==128) { error(c,name,"too many functions (maximum 128)"); return; }
-    Function *f=&c->functions[c->function_count++]; strcpy(f->name,id); f->body=body; f->node=n;
+    Function *f=&c->functions[c->function_count++]; strcpy(f->name,id); f->body=body; f->node=n; f->bank=bank;
     f->result=equals(c,type,"void")?-1:equals(c,type,"uint16_t");
     TSNode params=field(d,"parameters");
     if(children(params)>16) { error(c,params,"maximum 16 parameters"); return; }
@@ -714,6 +720,8 @@ static int compile(Compiler *c,TSNode root) {
         else if(kind(n,"function_definition")) function(c,n);
         else error(c,n,"unsupported top-level construct '%s'",ts_node_type(n));
     }
+    for(unsigned i=0;i<c->bank_tag_count;i++)if(!c->bank_tags[i].used)
+        bank_tag_error(c,c->bank_tags[i].start,"__bank must appear immediately before a helper function definition");
     if(ts_node_is_null(c->setup)||ts_node_is_null(c->loop)) error(c,root,"exactly one setup() and loop() are required");
     if(c->failed) return 0;
     for(unsigned i=0;i<c->function_count;i++) for(unsigned j=0;j<c->count;j++)
@@ -811,13 +819,19 @@ int main(int argc,char **argv) {
     if(!source || fread(source,1,(size_t)length,in)!=(size_t)length) { fprintf(stderr,"cannot read source\n"); free(source); fclose(in); return 1; }
     fclose(in);
     if(memchr(source,0,(size_t)length)) { fprintf(stderr,"source contains a NUL byte\n"); free(source); return 1; }
+    Compiler c={0}; c.source=source; c.path=argv[1]; c.native=native;
+    char *parser_source=malloc((size_t)length+1);
+    if(!parser_source) { free(source);return 1; }
+    memcpy(parser_source,source,(size_t)length+1);
+    if(!read_bank_tags(&c,parser_source)) { free(parser_source);free(source);return 1; }
     TSParser *parser=ts_parser_new();
-    if(!parser||!ts_parser_set_language(parser,tree_sitter_cpp())) { fprintf(stderr,"incompatible Tree-sitter grammar/runtime\n"); free(source); ts_parser_delete(parser); return 1; }
-    TSTree *tree=ts_parser_parse_string(parser,NULL,source,(uint32_t)length);
+    if(!parser||!ts_parser_set_language(parser,tree_sitter_cpp())) { fprintf(stderr,"incompatible Tree-sitter grammar/runtime\n"); free(parser_source); free(source); ts_parser_delete(parser); return 1; }
+    TSTree *tree=ts_parser_parse_string(parser,NULL,parser_source,(uint32_t)length);
+    free(parser_source);
     FILE *out=tmpfile();
     if(!tree||!out) { fprintf(stderr,"cannot allocate parse/output resources\n"); if(out)fclose(out);
     ts_tree_delete(tree); ts_parser_delete(parser); free(source); return 1; }
-    Compiler c={0}; c.source=source; c.path=argv[1]; c.out=out; c.native=native;
+    c.out=out;
     int ok=compile(&c,ts_tree_root_node(tree));
     if(ok && native) {
         /* Keep the existing semantic checks as the shared admission gate.

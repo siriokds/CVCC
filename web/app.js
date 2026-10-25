@@ -7,7 +7,7 @@
   let examples=[], current='square', currentFile='main.cvc', projectFiles={}, errorFile=null, busy=false, lastBuild=null, lastSource='', activeTab='diagnostics', errorLine=null;
   const outputs={diagnostics:'Pronto a compilare.',assembly:'Compila un programma per vedere il codice Z80.'};
   const escape=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:setup|loop|sound|soundVolume|bankRead|vramWriteBank|controllerRead|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite|videoMode|screenEnable|screenDisable|spriteFlicker|vdpWrite|vramPoke|vramWrite|vramRead)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
+  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:__bank|setup|loop|sound|soundVolume|bankRead|vramWriteBank|controllerRead|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite|videoMode|screenEnable|screenDisable|spriteFlicker|vdpWrite|vramPoke|vramWrite|vramRead)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
   function highlight(source){
     let result='',cursor=0;
     for(const match of source.matchAll(tokens)){
@@ -145,7 +145,7 @@
       $('cartridge-mapper').value=profile?.id||'';
       $('cartridge-ram-label').hidden=profile?.id!=='asc16l';
       $('cartridge-ram').value=String(config.ram_kib||16);
-      $('cartridge-note').textContent=profile ? (profile.banked?'Codice fisso: 32 KB. Banchi dati da 16 KB configurabili in cartridge.json.':'ROM fino a '+profile.rom_limit/1024+' KB. RAM: '+(profile.ram_end-profile.ram_start)/1024+' KB.')+' La scelta sarà applicata alla prossima compilazione.' : 'Mapper sconosciuto in cartridge.json.';
+      $('cartridge-note').textContent=profile ? (profile.banked?'Codice fisso: 32 KB. Funzioni: __bank(n). Dati: cartridge.json. Banchi da 16 KB.':'ROM fino a '+profile.rom_limit/1024+' KB. RAM: '+(profile.ram_end-profile.ram_start)/1024+' KB.')+' La scelta sarà applicata alla prossima compilazione.' : 'Mapper sconosciuto in cartridge.json.';
     }catch{$('cartridge-note').textContent='Correggi cartridge.json prima di cambiare mapper.';}
   }
   function changeCartridge(){
@@ -187,7 +187,7 @@
     const item=selectedExport();
     $('download').disabled=!item;
     if(!item)return;
-    $('download-size').textContent=`${item.size.toLocaleString('it-IT')} byte · codice e dati: ${(lastBuild.code_bytes+(lastBuild.bank_data_bytes||0)).toLocaleString('it-IT')} byte`;
+    $('download-size').textContent=`${item.size.toLocaleString('it-IT')} byte · codice e dati: ${(lastBuild.code_bytes+(lastBuild.bank_data_bytes||0)+(lastBuild.bank_code_bytes||0)).toLocaleString('it-IT')} byte`;
     $('download').title='Scarica l’ultima ROM compilata: '+lastBuild.name+item.suffix+'.sg';
   }
   function exportChoices(){
@@ -217,7 +217,7 @@
       outputs.diagnostics=`✓ ${result.cartridge.label} · RAM disponibile: ${result.cartridge.ram_end-result.cartridge.ram_start} byte\n✓ Parsing e controlli semantici superati\n✓ ROM assemblata con sjasmplus · ${result.rom_bytes.toLocaleString('it-IT')} byte\n✓ Build completata in ${(result.elapsed_ms/1000).toFixed(2)} s\n\nSHA-256  ${result.sha256}`;
       $('build-duration').textContent=(result.elapsed_ms/1000).toFixed(2)+' s';$('build-dot').className='success';
       $('rom-size').innerHTML=(result.rom_bytes/1024)+'<small>KiB</small>';
-      $('code-size').innerHTML=(result.code_bytes+(result.bank_data_bytes||0)).toLocaleString('it-IT')+'<small>byte</small>';
+      $('code-size').innerHTML=(result.code_bytes+(result.bank_data_bytes||0)+(result.bank_code_bytes||0)).toLocaleString('it-IT')+'<small>byte</small>';
       $('ram-size').innerHTML=result.ram_bytes+'<small>byte</small>';
       exportChoices();
       $('status-text').textContent='Build riuscita · '+name+'.sg';

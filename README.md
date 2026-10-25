@@ -433,7 +433,7 @@ Example `cartridge.json` (see `examples/banks`):
 ```
 
 `ram_kib` is optional and only valid for ASC16L (8 or 16, default 16). Bank keys
-are physical 16 KiB page numbers, 2..255. Pages 0 and 1 contain all functions,
+are physical 16 KiB page numbers, 2..255. Pages 0 and 1 contain untagged functions,
 IRQ code and ordinary `const` arrays. Files contain 1..16384 bytes, padded with
 `0xFF`; omitted pages are filled with `0xFF`. Paths stay inside the project.
 The existing 1 MiB project limit still applies in the IDE. A banked image has
@@ -448,10 +448,43 @@ Bank numbers are literals and must fit the generated image. `bankRead` accepts
 an expression for the offset; dynamic offsets wrap within the 16 KiB page,
 while out-of-range literal offsets are rejected. `vramWriteBank` requires literal
 offset and nonzero length and rejects transfers crossing the page boundary.
-Both APIs select the bank immediately before access, after evaluating expressions;
-there is no implicit bank state for callers to maintain. IRQ code stays fixed and
-does not change the bank. Functions and ordinary arrays are not automatically
-spread across banks. Banked functions are outside this first implementation.
+Both APIs select the bank immediately before access, after evaluating expressions,
+and restore the caller's bank before returning. They can be called from banked
+functions. IRQ code stays fixed and does not change the bank.
+
+### Explicit banked functions
+
+On ASC16L and Sega 315-5208 + Dahjee B, put `__bank(n)` before a helper function:
+
+```c
+__bank(3)
+uint16_t advance(uint16_t value, uint16_t limit) {
+    value++;
+    if (value == limit) { return 0; }
+    return value;
+}
+```
+
+Calls use the usual syntax: `tick = advance(tick, 408);`. Fixed-ROM call wrappers
+save the current bank, select the function's page, and restore the previous bank
+on every return, preserving the result. Nested calls between different banks,
+functions sharing one bank, and calls through fixed helpers are supported.
+Parameters still use static cells; recursion remains unsupported.
+
+The tag takes a decimal or hexadecimal literal from 2 to 255. `setup()` and
+`loop()` must remain untagged. Each code page holds up to 16 KiB, with functions
+in source order; overflow is a build error naming the bank and function.
+There is no automatic placement. Untagged helpers and ordinary constants stay
+in the fixed 32 KiB. Code and binary data cannot occupy the same page: reserve
+data pages through `cartridge.json`, code pages through tags. The image grows to
+include the highest page used by either, filling gaps with `0xFF`.
+
+Banked calls reserve six stack bytes rather than two for a fixed call, in addition
+to the callee's own needs. The compiler includes this in its call-chain RAM budget.
+The implementation remains portable C11, with tag parsing in `src/bank_tags.h`,
+placement in `src/backend_banks.h`, and fixed-ROM helpers in `runtime/banking.asm`.
+See `examples/banked-functions` for a 64 KiB project with movement/drawing in
+bank 2, math in bank 3, and a regular `main.cvc`.
 
 The build directory contains the generated assembly, runtime and padded bank
 files; rerunning sjasmplus there reproduces the entire ROM. CLI lowering accepts
@@ -469,7 +502,13 @@ transfers and reset on every profile:
 ```sh
 python3 tests/test_cartridges.py
 CVCC_WEB_CORE=/absolute/path/to/GearSF7000/platforms/web/dist/core.js python3 tests/test_cartridges.py
+python3 tests/test_banked_functions.py
+CVCC_WEB_CORE=/absolute/path/to/GearSF7000/platforms/web/dist/core.js python3 tests/test_banked_functions.py
 ```
+
+Banked-function execution tests cover byte/word arguments and results, nested
+calls, data/VRAM access from code banks, VBlank interrupts, reset, and continued
+execution on both banked mappers (including ASC16L's 8 and 16 KiB RAM options).
 
 ## Original Z80 backend and validation
 

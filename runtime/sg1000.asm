@@ -11,6 +11,10 @@ cvcc_start:
  ld bc,RAM_END-RAM_START-1
  ld (hl),a
  ldir
+ IFDEF CVCC_BANKED
+ ld a,2
+ call cvcc_select_bank
+ ENDIF
  ld a,$9f
  out ($7f),a
  ld a,$bf

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -65,10 +66,10 @@ def main():
         work = Path(temp)
         if args.backend == 'z80':
             (work / 'program.sj.asm').write_text(lowered)
-            for name in ('sg1000.asm', 'font.asm'):
+            for name in ('sg1000.asm', 'font.asm', 'banking.asm'):
                 shutil.copy2(ROOT / 'runtime' / name, work / name)
             compilation = subprocess.CompletedProcess([], 0, 'Original CVCC Z80 backend; no CVBasic dependency.\n', '')
-            published = ['program.sj.asm', 'sg1000.asm', 'font.asm'] + append_banks(work, profile, banks)
+            published = ['program.sj.asm', 'sg1000.asm', 'font.asm', 'banking.asm'] + append_banks(work, profile, banks)
         else:
             from gasm80_to_sjasmplus import adapt
             (work / 'program.bas').write_text(lowered)
@@ -84,11 +85,13 @@ def main():
         rom = (work / 'program.sg').read_bytes()
         if not rom or len(rom) > (profile['bank_count']*16384 if profile['banked'] else profile['rom_limit']):
             raise RuntimeError('ROM exceeds cartridge capacity')
-        metadata = dict(backend=args.backend, cartridge=profile, bank_data_bytes=sum(map(len, banks.values())), source=str(source), source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        symbols = dict((name, int(address,16)) for name,address in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$', (work/'program.sym').read_text(), re.M))
+        bank_code_bytes = sum(value for name,value in symbols.items() if re.fullmatch(r'CVCC_BANK_\d+_CODE_BYTES', name))
+        metadata = dict(bank_code_bytes=bank_code_bytes, backend=args.backend, cartridge=profile, bank_data_bytes=sum(map(len, banks.values())), source=str(source), source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
                         project_files={name:hashlib.sha256(file_bytes(text)).hexdigest() for name,text in inputs.items()},
                         frontend_sha256=hashlib.sha256(args.frontend.resolve().read_bytes()).hexdigest(),
                         dependencies=lock,
-                        runtime_sha256={name:hashlib.sha256((ROOT/'runtime'/name).read_bytes()).hexdigest() for name in ('sg1000.asm','font.asm')} if args.backend=='z80' else {},
+                        runtime_sha256={name:hashlib.sha256((ROOT/'runtime'/name).read_bytes()).hexdigest() for name in ('sg1000.asm','font.asm','banking.asm')} if args.backend=='z80' else {},
                         assembler=run([assembler, '--version']).stdout.strip(),
                         assembler_sha256=hashlib.sha256(Path(assembler).read_bytes()).hexdigest(),
                         rom_bytes=len(rom), rom_sha256=hashlib.sha256(rom).hexdigest())
