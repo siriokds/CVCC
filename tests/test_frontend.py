@@ -107,6 +107,11 @@ class FrontendTests(unittest.TestCase):
             'comparison_as_value': 'uint8_t x; void setup(){x=(x==1);} void loop(){}',
             'side_effect_expression': 'uint8_t x; void setup(){x=x++;} void loop(){}',
             'compound_assignment': 'uint8_t x; void setup(){x*=2;} void loop(){}',
+            'vblank_arity': 'void setup(){waitVBlank(1,2);} void loop(){}',
+            'vblank_range': 'void setup(){waitVBlank(65536);} void loop(){}',
+            'vblank_string': 'void setup(){waitVBlank("1");} void loop(){}',
+            'vblank_shadow': 'uint8_t waitVBlank; void setup(){} void loop(){}',
+            'vblank_shadow_function': 'void waitVBlank(){} void setup(){} void loop(){}',
             'call_arity': 'void setup(){waitFrame(1);} void loop(){}',
             'unknown_call': 'void setup(){foo();} void loop(){}',
             'string_escape': r'void setup(){printAt(0,"hello\n");} void loop(){}',
@@ -166,6 +171,21 @@ class FrontendTests(unittest.TestCase):
         # Guards branch before a potentially invalid dynamic array read.
         self.assertRegex(result.stdout, r'IF v10 < 3 THEN GOTO cvcc_bool\d+\nGOTO cvcc_bool\d+\ncvcc_bool\d+:\nIF v11\(v10\)')
 
+    def test_wait_vblank_aliases_and_count(self):
+        variants=[self.compile('void setup(){} void loop(){'+call+';}') for call in
+                  ('waitFrame()', 'waitVBlank()', 'waitVBlank(1)', 'waitVBlank(0x1)')]
+        for result in variants:
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout,variants[0].stdout)
+        zero=self.compile('void setup(){waitVBlank(0);} void loop(){}')
+        self.assertEqual(zero.returncode,0,zero.stderr)
+        self.assertNotIn('WAIT',zero.stdout)
+        counted=self.compile('uint16_t n=300; void setup(){waitVBlank(n);waitVBlank(2);} void loop(){waitVBlank();}')
+        self.assertEqual(counted.returncode,0,counted.stderr)
+        self.assertEqual(counted.stdout.count('DIM #cvcc_wait_remaining'),1)
+        self.assertIn('#cvcc_wait_remaining = #v0',counted.stdout)
+        self.assertEqual(counted.stdout.count('WHILE #cvcc_wait_remaining > 0'),2)
+
     def test_adapter_rejects_other_targets_and_banking(self):
         for source in ['SG1000: equ 0\nCVBASIC_BANK_SWITCHING: equ 0', 'SG1000: equ 1\nCVBASIC_BANK_SWITCHING: equ 1']:
             with self.assertRaises(ValueError):
@@ -216,6 +236,15 @@ class RomTests(unittest.TestCase):
         command(BUILD / 'reference-cvbasic', '--sg1000', dest / 'program.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
+
+    def test_wait_vblank_alias_rom(self):
+        source=(ROOT/'examples/counter.cvc').read_text().replace('waitFrame()', 'waitVBlank()')
+        path=BUILD/'counter-vblank.cvc';path.write_text(source)
+        dest=BUILD/'counter-vblank'
+        command(sys.executable,ROOT/'tools/build_rom.py',path,'--out-dir',dest)
+        import hashlib
+        self.assertEqual(hashlib.sha256((dest/'program.sg').read_bytes()).hexdigest(),
+                         '2f6b8572cb4f2a82383661587be1c5e845be0ecc975dea1455c0f4f1c73c66b8')
 
     def test_happy_face_exact_upstream_rom(self):
         # Upstream artwork stays in ignored build output; nothing is vendored.

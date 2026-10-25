@@ -193,7 +193,13 @@ errors, request origin checks and the static file allowlist. Set
   ROM initializers contain exactly N literals of the element type. RAM arrays
   support indexed assignment and standalone increment/decrement. Literal indices
   are checked against array size; other indices have no runtime bounds checks.
-- `waitFrame()`, `clearScreen()`, `printAt(position, "ASCII text")`,
+- `waitVBlank()`, `waitVBlank(n)` and its one-frame alias `waitFrame()`.
+  The count is an unsigned byte/word expression evaluated once at entry; zero
+  returns immediately. Counted waits use a shared two-byte runtime counter.
+  The current SG-1000 backend emits CVBasic WAIT (HALT with VBlank interrupts
+  enabled); waits belong in normal program flow, not interrupt handlers.
+  Waiting follows machine VBlank timing, not a fixed millisecond duration.
+- `clearScreen()`, `printAt(position, "ASCII text")`,
   `defineSprite(first, count, data)`, `sprite(index, y, x, pattern, color)`.
   Sprite API ordering follows CVBasic. Patterns are 16x16, 32 bytes each.
 
@@ -221,6 +227,11 @@ the backend's width rules; they do not provide short-circuit boolean evaluation.
 The `logic.cvc` example adds constant shifts and nested short-circuit conditions.
 
 ## Validation
+
+`waitVBlank()` and `waitVBlank(1)` lower identically to `waitFrame()`; the counter
+example keeps its exact baseline ROM hash. `wait_vblank.cvc` verifies zero-count
+waits, a 260-frame word count and one update per three VBlanks in NTSC/PAL.
+The count is sampled once, and the caller's variable is not decremented.
 
 `shifts_logic.cvc` exercises byte/word shifts, compound shifts, width truncation,
 operator precedence, logical negation, guarded array reads and short-circuit

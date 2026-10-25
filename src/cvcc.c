@@ -23,7 +23,7 @@ typedef struct {
     unsigned function_count;
     unsigned char calls[128][128], visited[128];
     unsigned loop_ids[64], loop_depth, next_loop, next_bool;
-    int current_function, failed;
+    int current_function, wait_counter_declared, failed;
 } Compiler;
 
 static int kind(TSNode n, const char *s) { return !ts_node_is_null(n) && !strcmp(ts_node_type(n), s); }
@@ -98,7 +98,7 @@ static void declare(Compiler *c,TSNode n) {
     if (kind(decl,"init_declarator")) { val=field(decl,"value"); decl=field(decl,"declarator"); }
     int array=kind(decl,"array_declarator"); TSNode name_node=array?field(decl,"declarator"):decl;
     char name[64]; if (!identifier(c,name_node,name)) return;
-    const char *reserved[]={"setup","loop","waitFrame","clearScreen","printAt","defineSprite","sprite"};
+    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(name,reserved[i])) {
         error(c,n,"reserved entry point or builtin name"); return;
     }
@@ -134,7 +134,7 @@ static void function(Compiler *c,TSNode n) {
         *slot=body; return;
     }
     char id[64]; if (!identifier(c,name,id)) return;
-    const char *reserved[]={"waitFrame","clearScreen","printAt","defineSprite","sprite"};
+    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(id,reserved[i])) { error(c,name,"reserved builtin name"); return; }
     for(unsigned i=0;i<c->function_count;i++) if(!strcmp(id,c->functions[i].name)) { error(c,name,"duplicate function"); return; }
     if(c->function_count==128) { error(c,name,"too many functions (maximum 128)"); return; }
@@ -268,9 +268,24 @@ static void literal_string(Compiler *c,TSNode n) {
 }
 static void builtin(Compiler *c,TSNode n) {
     TSNode fn=field(n,"function"), args=field(n,"arguments"); unsigned count=children(args);
-    if (equals(c,fn,"waitFrame")||equals(c,fn,"clearScreen")) {
-        if (count) { error(c,args,"expected no arguments"); return; }
-        fputs(equals(c,fn,"waitFrame")?"WAIT\n":"CLS\n",c->out);
+    if (equals(c,fn,"waitVBlank") || equals(c,fn,"waitFrame")) {
+        if(count>1 || (equals(c,fn,"waitFrame") && count)) { error(c,args,"waitVBlank expects zero or one argument; waitFrame expects none"); return; }
+        if(!count) { fputs("WAIT\n",c->out); return; }
+        TSNode amount=child(args,0);
+        if(kind(amount,"number_literal")) {
+            unsigned n; if(!number(c,amount,65535,&n)) return;
+            if(n<=1) { if(n) fputs("WAIT\n",c->out); return; }
+        }
+        // Snapshot the count once. No callbacks/interrupt user code can reenter
+        // this scratch counter in the currently supported frontend.
+        if(!c->wait_counter_declared) {
+            fputs("DIM #cvcc_wait_remaining\n",c->out); c->wait_counter_declared=1;
+        }
+        fputs("#cvcc_wait_remaining = ",c->out); expression(c,amount);
+        fputs("\nWHILE #cvcc_wait_remaining > 0\nWAIT\n#cvcc_wait_remaining = #cvcc_wait_remaining - 1\nWEND\n",c->out);
+    } else if(equals(c,fn,"clearScreen")) {
+        if(count) { error(c,args,"expected no arguments"); return; }
+        fputs("CLS\n",c->out);
     } else if (equals(c,fn,"printAt")) {
         unsigned pos; if (count!=2) { error(c,args,"printAt expects position and string"); return; }
         if (!number(c,child(args,0),767,&pos)) return;

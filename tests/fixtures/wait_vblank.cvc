@@ -1,0 +1,15 @@
+uint16_t delay = 260;
+uint8_t ready;
+uint8_t zero;
+uint8_t ticks;
+uint8_t period = 3;
+void setup() {
+    waitVBlank(0);
+    waitVBlank(zero);
+    waitVBlank(delay);
+    ready = 1;
+}
+void loop() {
+    waitVBlank(period);
+    ticks++;
+}

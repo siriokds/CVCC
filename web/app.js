@@ -5,7 +5,7 @@
   let examples=[], current='square', busy=false, lastBuild=null, lastSource='', activeTab='diagnostics', errorLine=null;
   const outputs={diagnostics:'Pronto a compilare.',assembly:'Compila un programma per vedere il codice Z80.',basic:'Compila un programma per vedere il passaggio CVBasic.'};
   const escape=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|for|break|continue|return)\b|\b(?:setup|loop|waitFrame|clearScreen|printAt|defineSprite|sprite)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
+  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|for|break|continue|return)\b|\b(?:setup|loop|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
   function highlight(source){
     let result='',cursor=0;
     for(const match of source.matchAll(tokens)){
