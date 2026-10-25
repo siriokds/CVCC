@@ -42,7 +42,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, {'error': 'Local origin required'})
         route = urlsplit(self.path).path
         if route == '/api/config':
-            examples = [{'id': name, 'source': (ROOT / 'examples' / f'{name}.cvc').read_text()} for name in ('square', 'counter')]
+            examples = [{'id': name, 'source': (ROOT / 'examples' / f'{name}.cvc').read_text()} for name in ('square', 'counter', 'patrol')]
             return self.send(200, dict(examples=examples, player_available=all((self.server.player / f).is_file() for f in ('core.js', 'core.wasm'))))
         files = {'/': ('index.html', 'text/html; charset=utf-8'),
                  '/app.js': ('app.js', 'text/javascript; charset=utf-8'),

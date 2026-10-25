@@ -1,0 +1,42 @@
+// A 16x16 outline square. Sprite bytes: left half, then right half.
+const uint8_t square[32] = {
+    255,128,128,128,128,128,128,128,128,128,128,128,128,128,128,255,
+    255,1,1,1,1,1,1,1,1,1,1,1,1,1,1,255
+};
+// RAM coordinates, ROM timing table, a 16-bit clock and helper functions.
+const uint16_t stages[3] = {120, 300, 480};
+const uint8_t colors[3] = {10, 8, 12};
+uint8_t x[3] = {24, 104, 184};
+uint8_t y[3] = {72, 104, 136};
+uint8_t i;
+uint16_t frames;
+
+void setup() {
+    defineSprite(0, 1, square);
+    printAt(35, "Functions / arrays / words");
+}
+
+void loop() {
+    waitFrame();
+    updateFleet();
+    drawFleet();
+}
+
+void updateFleet() {
+    frames++;
+    if (frames > 600) { frames = 0; return; }
+    i = 0;
+    while (i < 3) {
+        if (frames < stages[i]) { x[i]++; }
+        else { x[i]--; }
+        i++;
+    }
+}
+
+void drawFleet() {
+    i = 0;
+    while (i < 3) {
+        sprite(i, y[i], x[i], 0, colors[i]);
+        i++;
+    }
+}

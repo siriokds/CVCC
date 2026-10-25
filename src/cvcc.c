@@ -10,7 +10,8 @@
 
 extern const TSLanguage *tree_sitter_cpp(void);
 
-typedef struct { char name[64]; int array, size, initialized; TSNode value; } Symbol;
+typedef struct { char name[64]; int array, size, initialized, word, constant; TSNode value; } Symbol;
+typedef struct { char name[64]; TSNode body, node; } Function;
 typedef struct {
     const char *path;
     char *source;
@@ -18,7 +19,10 @@ typedef struct {
     Symbol symbols[256];
     unsigned count;
     TSNode setup, loop;
-    int failed;
+    Function functions[128];
+    unsigned function_count;
+    unsigned char calls[128][128], visited[128];
+    int current_function, failed;
 } Compiler;
 
 static int kind(TSNode n, const char *s) { return !ts_node_is_null(n) && !strcmp(ts_node_type(n), s); }
@@ -82,7 +86,8 @@ static void validate_tree(Compiler *c,TSNode n,unsigned depth) {
 }
 static void declare(Compiler *c,TSNode n) {
     TSNode type=field(n,"type"), decl=field(n,"declarator"), val={0}; int constant=0;
-    if (!equals(c,type,"uint8_t")) { error(c,type,"only uint8_t is supported in this prototype"); return; }
+    int word=equals(c,type,"uint16_t");
+    if (!word && !equals(c,type,"uint8_t")) { error(c,type,"expected uint8_t or uint16_t"); return; }
     for (unsigned i=0;i<children(n);i++) {
         TSNode k=child(n,i);
         if (ts_node_eq(k,type)||ts_node_eq(k,decl)) continue;
@@ -98,49 +103,81 @@ static void declare(Compiler *c,TSNode n) {
     }
     for (unsigned i=0;i<c->count;i++) if (!strcmp(name,c->symbols[i].name)) { error(c,n,"duplicate declaration '%s'",name); return; }
     if (c->count==256) { error(c,n,"too many global symbols (maximum 256)"); return; }
-    unsigned size=0;
+    unsigned size=0, max=word?65535:255;
     if (array) {
-        if (!constant || !kind(val,"initializer_list") || !number(c,field(decl,"size"),8192,&size) || !size) { error(c,n,"arrays must be const uint8_t with an explicit nonzero size and initializer"); return; }
-        if (children(val)!=size) { error(c,val,"array initializer must contain exactly %u bytes",size); return; }
-        for (unsigned i=0;i<size;i++) { unsigned value; if (!number(c,child(val,i),255,&value)) return; }
+        if (children(decl)!=2 || !number(c,field(decl,"size"),word?4096:8192,&size) || !size) { error(c,n,"arrays require an explicit nonzero size (maximum 8192 bytes)"); return; }
+        if (constant && ts_node_is_null(val)) { error(c,n,"ROM arrays require an initializer"); return; }
+        if (!ts_node_is_null(val)) {
+            if (!kind(val,"initializer_list") || children(val)!=size) { error(c,n,"array initializer must contain exactly %u elements",size); return; }
+            for (unsigned i=0;i<size;i++) { unsigned value; if (!number(c,child(val,i),max,&value)) return; }
+        }
     } else {
-        if (constant) { error(c,n,"scalar const is not supported yet"); return; }
-        if (!ts_node_is_null(val)) { unsigned value; if (!number(c,val,255,&value)) return; }
+        if (constant && ts_node_is_null(val)) { error(c,n,"constants require an initializer"); return; }
+        if (!ts_node_is_null(val)) { unsigned value; if (!number(c,val,max,&value)) return; }
     }
     Symbol *s=&c->symbols[c->count++];
-    strcpy(s->name,name); s->array=array; s->size=(int)size; s->value=val; s->initialized=!ts_node_is_null(val);
+    strcpy(s->name,name); s->array=array; s->size=(int)size; s->value=val;
+    s->initialized=!ts_node_is_null(val); s->word=word; s->constant=constant;
 }
 static void function(Compiler *c,TSNode n) {
     TSNode d=field(n,"declarator"), type=field(n,"type"), body=field(n,"body");
     if (!equals(c,type,"void") || !kind(d,"function_declarator") || !kind(body,"compound_statement") || children(n)!=3) {
-        error(c,n,"only void setup() and void loop() definitions are supported"); return;
+        error(c,n,"functions must return void and have a body"); return;
     }
-    if (children(d)!=2 || children(field(d,"parameters"))!=0) { error(c,d,"entry points must have empty parameter lists and no qualifiers"); return; }
+    if (children(d)!=2 || children(field(d,"parameters"))!=0) { error(c,d,"functions must have empty parameter lists and no qualifiers"); return; }
     TSNode name=field(d,"declarator"); TSNode *slot=NULL;
     if (equals(c,name,"setup")) slot=&c->setup;
     else if (equals(c,name,"loop")) slot=&c->loop;
-    else { error(c,name,"only setup and loop are supported"); return; }
-    if (!ts_node_is_null(*slot)) { error(c,name,"duplicate entry point"); return; }
-    *slot=body;
+    if (slot) {
+        if (!ts_node_is_null(*slot)) { error(c,name,"duplicate entry point"); return; }
+        *slot=body; return;
+    }
+    char id[64]; if (!identifier(c,name,id)) return;
+    const char *reserved[]={"waitFrame","clearScreen","printAt","defineSprite","sprite"};
+    for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(id,reserved[i])) { error(c,name,"reserved builtin name"); return; }
+    for(unsigned i=0;i<c->function_count;i++) if(!strcmp(id,c->functions[i].name)) { error(c,name,"duplicate function"); return; }
+    if(c->function_count==128) { error(c,name,"too many functions (maximum 128)"); return; }
+    Function *f=&c->functions[c->function_count++]; strcpy(f->name,id); f->body=body; f->node=n;
+}
+static void symbol_name(Compiler *c,Symbol *s) {
+    fprintf(c->out,"%s%c%u",s->word?"#":"",s->constant?(s->array?'d':'k'):'v',(unsigned)(s-c->symbols));
+}
+static void expression(Compiler *c,TSNode n);
+static Symbol *access(Compiler *c,TSNode n,int writing) {
+    int indexed=kind(n,"subscript_expression");
+    Symbol *s=lookup(c,indexed?field(n,"argument"):n); if(!s) return NULL;
+    if(writing && s->constant) { error(c,n,"cannot assign to const data"); return NULL; }
+    if(indexed!=s->array) { error(c,n,"arrays require exactly one index; scalars cannot be indexed"); return NULL; }
+    TSNode index={0};
+    if(indexed) {
+        TSNode indices=field(n,"indices");
+        if(children(indices)!=1) { error(c,n,"arrays require exactly one index"); return NULL; }
+        index=child(indices,0);
+        if(kind(index,"number_literal")) {
+            unsigned value; if(!number(c,index,65535,&value)) return NULL;
+            if(value>=(unsigned)s->size) { error(c,index,"array index outside 0..%d",s->size-1); return NULL; }
+        }
+    }
+    symbol_name(c,s);
+    if(indexed) { fputc('(',c->out); expression(c,index); fputc(')',c->out); }
+    return s;
 }
 static void expression(Compiler *c,TSNode n) {
     if (c->failed) return;
-    if (kind(n,"number_literal")) { unsigned v; if (number(c,n,255,&v)) fprintf(c->out,"%u",v); }
-    else if (kind(n,"identifier")) {
-        Symbol *s=lookup(c,n); if (!s) return;
-        if (s->array) { error(c,n,"ROM arrays are only valid as defineSprite data"); return; }
-        fprintf(c->out,"v%u",(unsigned)(s-c->symbols));
-    } else if (kind(n,"parenthesized_expression") && children(n)==1) {
+    if (kind(n,"number_literal")) { unsigned v; if (number(c,n,65535,&v)) fprintf(c->out,"%u",v); }
+    else if (kind(n,"identifier") || kind(n,"subscript_expression")) access(c,n,0);
+    else if (kind(n,"parenthesized_expression") && children(n)==1) {
         fputc('(',c->out); expression(c,child(n,0)); fputc(')',c->out);
     } else if (kind(n,"binary_expression")) {
         TSNode op=field(n,"operator");
-        if (!(equals(c,op,"+")||equals(c,op,"-"))) { error(c,op,"only + and - are supported in byte expressions"); return; }
+        if (!(equals(c,op,"+")||equals(c,op,"-"))) { error(c,op,"only + and - are supported in integer expressions"); return; }
         fputc('(',c->out); expression(c,field(n,"left"));
         fprintf(c->out," %c ",equals(c,op,"+")?'+':'-'); expression(c,field(n,"right")); fputc(')',c->out);
     } else if (kind(n,"unary_expression") && equals(c,field(n,"operator"),"-")) {
         fputs("-",c->out); expression(c,field(n,"argument"));
-    } else error(c,n,"unsupported byte expression '%s'",ts_node_type(n));
+    } else error(c,n,"unsupported integer expression '%s'",ts_node_type(n));
 }
+
 static void condition(Compiler *c,TSNode n) {
     if (kind(n,"condition_clause")) {
         if (children(n)!=1) { error(c,n,"declarations/initializers in conditions are unsupported"); return; }
@@ -178,14 +215,21 @@ static void builtin(Compiler *c,TSNode n) {
         unsigned first,total; if (count!=3) { error(c,args,"defineSprite expects first, count, ROM data"); return; }
         if (!number(c,child(args,0),63,&first)||!number(c,child(args,1),64,&total)) return;
         Symbol *s=lookup(c,child(args,2)); if (!s) return;
-        if (!s->array || !total || first+total>64 || s->size!=(int)(total*32)) { error(c,args,"defineSprite needs 32 bytes per 16x16 pattern and a valid pattern range"); return; }
+        if (!s->array || !s->constant || s->word || !total || first+total>64 || s->size!=(int)(total*32)) { error(c,args,"defineSprite needs 32 bytes per 16x16 pattern and a valid pattern range"); return; }
         fprintf(c->out,"DEFINE SPRITE %u,%u,d%u\n",first,total,(unsigned)(s-c->symbols));
     } else if (equals(c,fn,"sprite")) {
         if (count!=5) { error(c,args,"sprite expects index, y, x, pattern, color"); return; }
         fputs("SPRITE ",c->out);
         for (unsigned i=0;i<5;i++) { if(i) fputc(',',c->out); expression(c,child(args,i)); }
         fputc('\n',c->out);
-    } else error(c,fn,"unsupported function call");
+    } else {
+        for(unsigned i=0;i<c->function_count;i++) if(equals(c,fn,c->functions[i].name)) {
+            if(count) { error(c,args,"user functions expect no arguments"); return; }
+            if(c->current_function>=0) c->calls[c->current_function][i]=1;
+            fprintf(c->out,"GOSUB cvcc_fn%u\n",i); return;
+        }
+        error(c,fn,"unsupported function call");
+    }
 }
 static void statement(Compiler *c,TSNode n,unsigned depth) {
     if (c->failed) return;
@@ -197,13 +241,12 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
         TSNode e=child(n,0);
         if (kind(e,"assignment_expression") || kind(e,"update_expression")) {
             int update=kind(e,"update_expression");
-            Symbol *s=lookup(c,field(e,update?"argument":"left")); if (!s) return;
-            if (s->array) { error(c,e,"cannot assign to ROM data"); return; }
+            TSNode target=field(e,update?"argument":"left");
             TSNode op=field(e,"operator");
             if ((!update&&!equals(c,op,"=")) || (update&&!equals(c,op,"++")&&!equals(c,op,"--"))) { error(c,op,"unsupported assignment operator"); return; }
-            unsigned id=(unsigned)(s-c->symbols);
-            fprintf(c->out,"v%u = ",id);
-            if(update) fprintf(c->out,"v%u %c 1",id,equals(c,op,"++")?'+':'-');
+            if(!access(c,target,1)) return;
+            fputs(" = ",c->out);
+            if(update) { access(c,target,0); fprintf(c->out," %c 1",equals(c,op,"++")?'+':'-'); }
             else expression(c,field(e,"right"));
             fputc('\n',c->out);
         } else if(kind(e,"call_expression")) builtin(c,e);
@@ -219,7 +262,17 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
     } else if(kind(n,"while_statement")) {
         fputs("WHILE ",c->out); condition(c,field(n,"condition")); fputc('\n',c->out);
         statement(c,field(n,"body"),depth+1); fputs("WEND\n",c->out);
+    } else if(kind(n,"return_statement")) {
+        if(children(n)) { error(c,n,"void functions cannot return a value"); return; }
+        fputs(c->current_function<0?"GOTO cvcc_main_loop\n":"RETURN\n",c->out);
     } else error(c,n,"unsupported statement '%s'",ts_node_type(n));
+}
+static void check_calls(Compiler *c,unsigned id) {
+    if(c->visited[id]==2 || c->failed) return;
+    if(c->visited[id]==1) { error(c,c->functions[id].node,"recursive calls are unsupported"); return; }
+    c->visited[id]=1;
+    for(unsigned i=0;i<c->function_count;i++) if(c->calls[id][i]) check_calls(c,i);
+    c->visited[id]=2;
 }
 static int compile(Compiler *c,TSNode root) {
     validate_tree(c,root,0);
@@ -232,18 +285,41 @@ static int compile(Compiler *c,TSNode root) {
     }
     if(ts_node_is_null(c->setup)||ts_node_is_null(c->loop)) error(c,root,"exactly one setup() and loop() are required");
     if(c->failed) return 0;
+    for(unsigned i=0;i<c->function_count;i++) for(unsigned j=0;j<c->count;j++)
+        if(!strcmp(c->functions[i].name,c->symbols[j].name)) error(c,c->functions[i].node,"function conflicts with global symbol");
+    if(c->failed) return 0;
     fputs("' Experimental CVCC output; SG-1000 only\n",c->out);
-    for(unsigned i=0;i<c->count;i++) if(!c->symbols[i].array) fprintf(c->out,"DIM v%u\n",i);
-    for(unsigned i=0;i<c->count;i++) if(!c->symbols[i].array && c->symbols[i].initialized) {
-        unsigned v; if(number(c,c->symbols[i].value,255,&v)) fprintf(c->out,"v%u = %u\n",i,v);
+    for(unsigned i=0;i<c->count;i++) {
+        Symbol *s=&c->symbols[i];
+        if(s->constant && s->array) continue;
+        fputs(s->constant?"CONST ":"DIM ",c->out); symbol_name(c,s);
+        if(s->array) fprintf(c->out,"(%d)",s->size);
+        if(s->constant) { unsigned v=0; number(c,s->value,s->word?65535:255,&v); fprintf(c->out," = %u",v); }
+        fputc('\n',c->out);
     }
+    for(unsigned i=0;i<c->count;i++) {
+        Symbol *s=&c->symbols[i];
+        if(s->constant || !s->initialized) continue;
+        for(int j=0;j<(s->array?s->size:1);j++) {
+            unsigned v=0; number(c,s->array?child(s->value,(unsigned)j):s->value,s->word?65535:255,&v);
+            symbol_name(c,s); if(s->array) fprintf(c->out,"(%d)",j);
+            fprintf(c->out," = %u\n",v);
+        }
+    }
+    c->current_function=-1;
     statement(c,c->setup,0);
     fputs("cvcc_main_loop:\n",c->out); statement(c,c->loop,0); fputs("GOTO cvcc_main_loop\n",c->out);
-    for(unsigned i=0;i<c->count;i++) if(c->symbols[i].array) {
-        Symbol *s=&c->symbols[i]; fprintf(c->out,"d%u:\n",i);
+    for(unsigned i=0;i<c->function_count;i++) {
+        c->current_function=(int)i;
+        fprintf(c->out,"cvcc_fn%u: PROCEDURE\n",i);
+        statement(c,c->functions[i].body,0); fputs("END\n",c->out);
+    }
+    for(unsigned i=0;i<c->function_count;i++) check_calls(c,i);
+    for(unsigned i=0;i<c->count;i++) if(c->symbols[i].array && c->symbols[i].constant) {
+        Symbol *s=&c->symbols[i]; symbol_name(c,s); fputs(":\n",c->out);
         for(int j=0;j<s->size;j++) {
-            unsigned v; number(c,child(s->value,(unsigned)j),255,&v);
-            if(j%16==0) fputs("DATA BYTE ",c->out);
+            unsigned v=0; number(c,child(s->value,(unsigned)j),s->word?65535:255,&v);
+            if(j%16==0) fputs(s->word?"DATA ":"DATA BYTE ",c->out);
             fprintf(c->out,"%s%u",j%16?",":"",v);
             if(j%16==15 || j==s->size-1) fputc('\n',c->out);
         }
@@ -258,7 +334,7 @@ static int compile(Compiler *c,TSNode root) {
     return !c->failed;
 }
 int main(int argc,char **argv) {
-    if(argc!=2) { fprintf(stderr,"Usage: cvcc source.cvc > output.bas\nExperimental uint8_t SG-1000 frontend (not standard C++).\n"); return 2; }
+    if(argc!=2) { fprintf(stderr,"Usage: cvcc source.cvc > output.bas\nExperimental SG-1000 frontend (not standard C++).\n"); return 2; }
     FILE *in=fopen(argv[1],"rb"); if(!in) { perror(argv[1]); return 1; }
     if(fseek(in,0,SEEK_END)||ftell(in)<0||ftell(in)>1024*1024) { fprintf(stderr,"source must be a seekable file of at most 1 MiB\n"); fclose(in); return 1; }
     long length=ftell(in); rewind(in);

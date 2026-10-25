@@ -136,32 +136,50 @@ errors, request origin checks and the static file allowlist. Set
 
 - Exactly one `void setup()` and `void loop()`, with empty parameter lists.
   Setup runs once; loop repeats with a direct jump, without a call/return wrapper.
-- Global `uint8_t` variables, optionally initialized with byte literals.
+- Additional `void name()` functions, defined before or after their callers.
+  Calls lower to GOSUB/PROCEDURE; recursion (including indirect cycles) is rejected.
+  `return;` exits a helper, ends setup, or starts the next loop iteration.
+- Global `uint8_t` and `uint16_t` variables, optionally initialized with literals.
+  Scalar `const` declarations require a literal initializer.
   Uninitialized globals are zeroed by the pinned SG-1000 runtime before setup.
-- Decimal and hexadecimal literals in `0..255`; `+`, `-`, unary minus,
+- Decimal and hexadecimal literals in `0..65535`; `+`, `-`, unary minus,
   parentheses, assignment, and standalone `++`/`--`.
-- `if`/`else` and `while`. Conditions use a byte value or one comparison:
+- `if`/`else` and `while`. Conditions use an integer value or one comparison:
   `==`, `!=`, `<`, `>`, `<=`, `>=`.
-- `const uint8_t name[N] = {...}` as ROM data, with exactly N literal bytes.
-  Arrays are currently only usable by `defineSprite`; indexing is not supported.
+- One-dimensional byte/word RAM arrays (`uint16_t values[N];`) and ROM arrays
+  (`const uint16_t values[N] = {...};`), accessed with `values[index]`.
+  Sizes are explicit positive literals. Optional RAM initializers and mandatory
+  ROM initializers contain exactly N literals of the element type. RAM arrays
+  support indexed assignment and standalone increment/decrement. Literal indices
+  are checked against array size; other indices have no runtime bounds checks.
 - `waitFrame()`, `clearScreen()`, `printAt(position, "ASCII text")`,
   `defineSprite(first, count, data)`, `sprite(index, y, x, pattern, color)`.
   Sprite API ordering follows CVBasic. Patterns are 16x16, 32 bytes each.
 
 Names are case-sensitive and mapped to internal BASIC symbols. No header is
-needed for `uint8_t` in this language. Byte arithmetic uses CVBasic's byte
-semantics, including wraparound; it does **not** implement C integer promotions.
+needed for either integer type. Arithmetic uses CVBasic's unsigned byte/word
+semantics, including wraparound and truncation on assignment to a narrower type; it does **not** implement C integer promotions.
 Comparisons are supported only as conditions, not as numeric expression values.
 Strings currently exclude escapes and non-ASCII characters.
 
-Unsupported types, locals, parameters, user functions, pointers, short-circuit
+Function parameters, return values, locals, unsupported types, pointers, short-circuit
 operators, preprocessing, SFRs, events, banking and other constructs are rejected.
 Diagnostics contain source path and one-based line/column ranges (byte columns).
-Safety limits: 1 MiB source, 256 symbols, 128 syntax levels, 64 statement levels,
-8192 bytes per ROM array; generated BASIC lines must fit the upstream lexer.
+Safety limits: 1 MiB source, 256 global symbols, 128 helper functions,
+128 syntax levels, 64 statement levels, 8192 bytes per array; generated BASIC lines must fit the upstream lexer.
 These are prototype limits, not the final language specification.
 
+The `patrol.cvc` workbench example combines helper functions, indexed RAM byte
+arrays and a ROM word table with a 16-bit frame counter. Available RAM remains
+machine-dependent: the SG-1000 backend checks the total allocation at build time.
+
 ## Validation
+
+`functions_arrays.cvc` is also compared byte-for-byte with a handwritten BASIC
+reference (stable variable names preserve CVBasic's hash-based RAM placement).
+Its ROM has been checked for 180 frames on both SG-1000 NTSC and SC-3000 PAL:
+indexed byte/word reads and writes, initialized RAM, 16-bit wraparound, narrowing,
+negation, unsigned comparison, nested calls and early returns all passed.
 
 The test suite compares the counter example with handwritten BASIC and rebuilds
 CVBasic's original Happy Face example from a local C-like fixture using

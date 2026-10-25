@@ -1,0 +1,54 @@
+const uint8_t seed[3] = {7, 11, 255};
+const uint16_t addresses[3] = {0x1800, 0x1900, 65535};
+const uint16_t base = 0x1800;
+uint8_t bytes[3];
+uint16_t words[3];
+uint8_t initialized[2] = {42, 99};
+uint16_t initializedWords[2] = {256, 65535};
+uint8_t index;
+uint16_t sum;
+uint16_t wrapped = 65535;
+uint8_t narrowed;
+uint8_t returned;
+uint8_t ticks;
+uint16_t negative;
+uint8_t compared;
+
+void setup() {
+    fill();
+    wrapped++;
+    narrowed = 256;
+    negative = -words[0];
+    if (words[0] > 255) { compared = 1; }
+    early();
+    return;
+    returned = 99;
+}
+
+void loop() {
+    tick();
+    waitFrame();
+    return;
+    returned = 98;
+}
+
+void fill() {
+    index = 0;
+    while (index < 3) {
+        bytes[index] = seed[index];
+        words[index] = addresses[index];
+        index++;
+    }
+    words[1]++;
+    words[2]++;
+    bytes[2]++;
+    sum = words[0] + words[1] - base;
+}
+
+void early() {
+    if (bytes[0] == 7) { returned = 1; return; }
+    returned = 2;
+}
+
+void tick() { bump(); }
+void bump() { ticks++; }

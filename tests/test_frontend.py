@@ -67,13 +67,38 @@ class FrontendTests(unittest.TestCase):
             'unknown_symbol': 'void setup(){x=1;} void loop(){}',
             'duplicate_symbol': 'uint8_t x; uint8_t x; void setup(){} void loop(){}',
             'builtin_shadow': 'uint8_t waitFrame; void setup(){} void loop(){}',
-            'word_type': 'uint16_t x; void setup(){} void loop(){}',
+            'word_initializer_range': 'uint16_t x=65536; void setup(){} void loop(){}',
+            'literal_range': 'uint16_t x; void setup(){x=65536;} void loop(){}',
+            'function_params': 'void f(uint8_t x){} void setup(){} void loop(){}',
+            'function_value': 'uint8_t f(){return 1;} void setup(){} void loop(){}',
+            'return_value': 'void f(){return 1;} void setup(){} void loop(){}',
+            'recursive': 'void f(){f();} void setup(){} void loop(){}',
+            'indirect_recursion': 'void f(){g();} void g(){f();} void setup(){} void loop(){}',
+            'entry_call': 'void setup(){} void loop(){setup();}',
+            'function_arguments': 'void f(){} void setup(){f(1);} void loop(){}',
+            'duplicate_function': 'void f(){} void f(){} void setup(){} void loop(){}',
+            'function_builtin': 'void waitFrame(){} void setup(){} void loop(){}',
+            'function_symbol': 'void f(){} uint8_t f; void setup(){} void loop(){}',
+            'function_symbol_reverse': 'uint8_t f; void f(){} void setup(){} void loop(){}',
+            'array_bound': 'uint16_t a[2]; void setup(){a[2]=1;} void loop(){}',
+            'array_multi_index': 'uint8_t a[2]; void setup(){a[0,1]=1;} void loop(){}',
+            'scalar_index': 'uint8_t a; void setup(){a[0]=1;} void loop(){}',
+            'array_no_index': 'uint8_t a[2]; void setup(){a=1;} void loop(){}',
+            'rom_index_write': 'const uint16_t a[1]={256}; void setup(){a[0]++;} void loop(){}',
+            'array_side_effect_index': 'uint8_t a[2]; uint8_t i; void setup(){a[i++]=1;} void loop(){}',
+            'array_word_range': 'const uint16_t a[1]={65536}; void setup(){} void loop(){}',
+            'array_empty': 'uint8_t a[0]; void setup(){} void loop(){}',
+            'array_unsized': 'uint8_t a[]={1}; void setup(){} void loop(){}',
+            'array_nested': 'uint8_t a[2][2]; void setup(){} void loop(){}',
+            'ram_short_initializer': 'uint8_t a[2]={1}; void setup(){} void loop(){}',
+            'const_missing': 'const uint16_t a; void setup(){} void loop(){}',
+            'const_write': 'const uint16_t a=1; void setup(){a=2;} void loop(){}',
+            'sprite_ram': 'uint8_t a[32]; void setup(){defineSprite(0,1,a);} void loop(){}',
+            'sprite_word': 'const uint16_t a[1]={0}; void setup(){defineSprite(0,1,a);} void loop(){}',
             'pointer': 'uint8_t *x; void setup(){} void loop(){}',
             'initializer_range': 'uint8_t x=256; void setup(){} void loop(){}',
-            'expression_range': 'uint8_t x; void setup(){x=256;} void loop(){}',
             'multiple_declarators': 'uint8_t x,y; void setup(){} void loop(){}',
             'volatile': 'volatile uint8_t x; void setup(){} void loop(){}',
-            'mutable_array': 'uint8_t x[1]={0}; void setup(){} void loop(){}',
             'short_array': 'const uint8_t x[2]={0}; void setup(){} void loop(){}',
             'rom_write': 'const uint8_t x[1]={0}; void setup(){x=1;} void loop(){}',
             'rom_read': 'const uint8_t x[1]={0}; uint8_t y; void setup(){y=x;} void loop(){}',
@@ -88,8 +113,6 @@ class FrontendTests(unittest.TestCase):
             'prefixed_string': 'void setup(){printAt(0,u8"hi");} void loop(){}',
             'string_position': 'void setup(){printAt(768,"hi");} void loop(){}',
             'sprite_size': 'const uint8_t a[1]={0}; void setup(){defineSprite(0,1,a);} void loop(){}',
-            'function': 'void f(){} void setup(){} void loop(){}',
-            'return': 'void setup(){return;} void loop(){}',
             'for': 'void setup(){for(;;){}} void loop(){}',
             'preprocessor': '#define X 1\nvoid setup(){} void loop(){}',
             'constexpr_if': 'void setup(){if constexpr(1){}} void loop(){}',
@@ -105,6 +128,13 @@ class FrontendTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, '')
                 self.assertRegex(result.stderr, r'test.cvc:\d+:\d+: error:')
+
+    def test_functions_arrays_words(self):
+        result = self.compile((ROOT / 'tests/fixtures/functions_arrays.cvc').read_text())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for snippet in ['DIM #v4(3)', '#v4(v7) = #d1(v7)', 'GOSUB cvcc_fn3',
+                        'DATA 6144,6400,65535', 'CONST #k2 = 6144', 'RETURN']:
+            self.assertIn(snippet, result.stdout)
 
     def test_adapter_rejects_other_targets_and_banking(self):
         for source in ['SG1000: equ 0\nCVBASIC_BANK_SWITCHING: equ 0', 'SG1000: equ 1\nCVBASIC_BANK_SWITCHING: equ 1']:
@@ -129,6 +159,14 @@ class RomTests(unittest.TestCase):
         command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'examples/counter.cvc', '--out-dir', dest)
         cvb = ROOT / '.work/deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', ROOT / 'tests/fixtures/counter.bas', dest / 'reference.asm', str(cvb) + '/')
+        command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
+        self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
+
+    def test_functions_arrays_against_handwritten_basic(self):
+        dest = BUILD / 'functions-arrays'
+        command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'tests/fixtures/functions_arrays.cvc', '--out-dir', dest)
+        cvb = ROOT / '.work/deps/CVBasic'
+        command(BUILD / 'reference-cvbasic', '--sg1000', ROOT / 'tests/fixtures/functions_arrays.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
 
