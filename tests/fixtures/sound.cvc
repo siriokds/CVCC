@@ -1,0 +1,18 @@
+// Tone dividers and linear volumes: SG-1000 SN76489.
+uint16_t period = 440;
+uint8_t volume = 15;
+uint16_t nextPitch() { period += 1; return period; }
+uint8_t nextVolume() { volume -= 1; return volume; }
+void setup() {
+    sound(0, 220, 12);
+    sound(1, 440, 10);
+    sound(2, nextPitch(), nextVolume());
+    sound(3, 5, 8);
+}
+void loop() {
+    waitVBlank(30);
+    soundVolume(0, 0);
+    soundVolume(1, 0);
+    soundVolume(2, 0);
+    soundVolume(3, 0);
+}

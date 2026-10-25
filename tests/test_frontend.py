@@ -228,6 +228,34 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('v2 = v2 + 1\n#v1 = 0\ncvcc_case0_1:',result.stdout)
         self.assertIn('GOTO cvcc_continue5',result.stdout)
 
+    def test_sound_and_argument_order(self):
+        result=self.compile('uint16_t period=200; uint8_t volume=9; uint16_t pitch(){volume=4;return period;} uint8_t level(){return volume;} void setup(){sound(0,440,15);sound(3,5,10);soundVolume(2,0);sound(1,pitch(),level());} void loop(){waitVBlank();soundVolume(1,volume);}')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('SOUND 0,440,15',result.stdout)
+        self.assertIn('SOUND 3,5,10',result.stdout)
+        self.assertIn('SOUND 2,,0',result.stdout)
+        self.assertLess(result.stdout.index('GOSUB cvcc_fn0'),result.stdout.index('GOSUB cvcc_fn1'))
+        self.assertIn('SOUND 1,#cvcc_t0,cvcc_t1',result.stdout)
+
+    def test_sound_rejections(self):
+        for call in ['sound()', 'sound(0,1)', 'sound(4,1,1)', 'sound(ch,1,1)',
+                     'sound(0,1024,1)', 'sound(3,8,1)', 'sound(0,1,16)',
+                     'soundVolume(0)', 'soundVolume(4,1)', 'soundVolume(ch,1)',
+                     'soundVolume(0,16)', 'soundVolume(0,1,2)']:
+            with self.subTest(call=call):
+                result=self.compile('uint8_t ch; void setup(){'+call+';} void loop(){}')
+                self.assertNotEqual(result.returncode,0)
+                self.assertEqual(result.stdout,'')
+        for name in ('sound','soundVolume'):
+            for declaration in ('uint8_t '+name+';', 'void '+name+'(){}'):
+                self.assertNotEqual(self.compile(declaration+' void setup(){} void loop(){}').returncode,0)
+
+    def test_sound_rom(self):
+        dest=BUILD/'sound'
+        command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'tests/fixtures/sound.cvc','--out-dir',dest)
+        command('gasm80',dest/'program.gasm.asm','-o',dest/'reference.sg')
+        self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
+
     def test_controller_read(self):
         result=self.compile('uint8_t p; uint8_t identity(uint8_t x){return x;} void setup(){} void loop(){waitVBlank(); p=controllerRead(1); p=identity(controllerRead(2)); if(p && controllerRead(1)){p=controllerRead(2)>>1;} controllerRead(1);}')
         self.assertEqual(result.returncode,0,result.stderr)

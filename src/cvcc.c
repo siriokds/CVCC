@@ -104,7 +104,7 @@ static void declare(Compiler *c,TSNode n) {
     if (kind(decl,"init_declarator")) { val=field(decl,"value"); decl=field(decl,"declarator"); }
     int array=kind(decl,"array_declarator"); TSNode name_node=array?field(decl,"declarator"):decl;
     char name[64]; if (!identifier(c,name_node,name)) return;
-    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead"};
+    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead","sound","soundVolume"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(name,reserved[i])) {
         error(c,n,"reserved entry point or builtin name"); return;
     }
@@ -141,7 +141,7 @@ static void function(Compiler *c,TSNode n) {
         *slot=body; return;
     }
     char id[64]; if (!identifier(c,name,id)) return;
-    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead"};
+    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead","sound","soundVolume"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(id,reserved[i])) { error(c,name,"reserved builtin name"); return; }
     for(unsigned i=0;i<c->function_count;i++) if(!strcmp(id,c->functions[i].name)) { error(c,name,"duplicate function"); return; }
     if(c->function_count==128) { error(c,name,"too many functions (maximum 128)"); return; }
@@ -362,6 +362,16 @@ static void literal_string(Compiler *c,TSNode n) {
 static void builtin(Compiler *c,TSNode n) {
     TSNode fn=field(n,"function"), args=field(n,"arguments"); unsigned count=children(args);
     if(equals(c,fn,"controllerRead")) { controller_read(c,n);
+    } else if(equals(c,fn,"sound") || equals(c,fn,"soundVolume")) {
+        int volume_only=equals(c,fn,"soundVolume"); unsigned channel,value;
+        if(count!=(volume_only?2u:3u)) { error(c,args,"sound expects channel, period/control, volume; soundVolume expects channel, volume"); return; }
+        if(!number(c,child(args,0),3,&channel)) return;
+        if(!volume_only && kind(child(args,1),"number_literal") && !number(c,child(args,1),channel==3?7:1023,&value)) return;
+        if(kind(child(args,count-1),"number_literal") && !number(c,child(args,count-1),15,&value)) return;
+        if(has_call(args)) for(unsigned i=1;i<count;i++) snapshot(c,child(args,i));
+        fprintf(c->out,"SOUND %u,",channel);
+        if(!volume_only) expression(c,child(args,1));
+        fputc(',',c->out); expression(c,child(args,count-1)); fputc('\n',c->out);
     } else if(equals(c,fn,"videoMode") || equals(c,fn,"spriteFlicker")) {
         unsigned value;
         if(count!=1) { error(c,args,"expected one literal argument"); return; }

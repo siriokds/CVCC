@@ -209,6 +209,16 @@ Browser edits do not silently overwrite the original files on disk.
 Launch with `--project /absolute/path/airsea` to open a local project. Air-Sea's
 project and original data remain in ignored local work directories.
 
+### PSG sound
+
+`sound(channel, periodOrControl, volume)` maps to CVBasic `SOUND` on the
+SG-1000/SC-3000 SN76489. Channel must be a literal 0..3. Tone channels 0..2
+accept a 10-bit divider (0..1023, not Hertz); channel 3 accepts a noise control
+0..7. Volume is linear 0..15, with 0 silent. `soundVolume(channel, volume)`
+changes volume without rewriting the divider or restarting noise. Expressions
+are evaluated once, left to right; runtime values must stay within these ranges.
+Sound continues until changed or muted. These calls do not wait for a frame.
+
 ## Supported subset
 
 - Exactly one `void setup()` and `void loop()`, with empty parameter lists.
