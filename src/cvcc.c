@@ -362,6 +362,25 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
             if(!ts_node_is_null(alt)) { fputs("ELSE\n",c->out); statement(c,child(alt,0),depth+1); }
             fputs("END IF\n",c->out);
         }
+    } else if(kind(n,"do_statement")) {
+        if(c->loop_depth==64) { error(c,n,"loop nesting exceeds 64"); return; }
+        unsigned id=c->next_loop++;
+        c->loop_ids[c->loop_depth++]=id;
+        fprintf(c->out,"cvcc_do%u:\n",id);
+        statement(c,field(n,"body"),depth+1);
+        // A do-loop continue tests the condition; it must not restart the body.
+        fprintf(c->out,"cvcc_continue%u:\n",id);
+        TSNode cond=field(n,"condition");
+        if(logical(c,cond)) {
+            unsigned yes=c->next_bool++, no=c->next_bool++;
+            branch(c,cond,yes,no);
+            fprintf(c->out,"cvcc_bool%u:\nGOTO cvcc_do%u\ncvcc_bool%u:\n",yes,id,no);
+        } else {
+            fputs("IF ",c->out); condition(c,cond);
+            fprintf(c->out," THEN GOTO cvcc_do%u\n",id);
+        }
+        fprintf(c->out,"cvcc_break%u:\n",id);
+        c->loop_depth--;
     } else if(kind(n,"while_statement") || kind(n,"for_statement")) {
         int counted=kind(n,"for_statement");
         if(c->loop_depth==64) { error(c,n,"loop nesting exceeds 64"); return; }

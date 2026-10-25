@@ -118,6 +118,10 @@ class FrontendTests(unittest.TestCase):
             'prefixed_string': 'void setup(){printAt(0,u8"hi");} void loop(){}',
             'string_position': 'void setup(){printAt(768,"hi");} void loop(){}',
             'sprite_size': 'const uint8_t a[1]={0}; void setup(){defineSprite(0,1,a);} void loop(){}',
+            'do_invalid_condition': 'void setup(){do {} while(missing);} void loop(){}',
+            'do_bad_body': 'void setup(){do {uint8_t local;} while(0);} void loop(){}',
+            'do_break_scope': 'void setup(){do {} while(0); break;} void loop(){}',
+            'do_continue_scope': 'void setup(){do {} while(0); continue;} void loop(){}',
             'for_local': 'void setup(){for(uint8_t i=0;i<3;i++){}} void loop(){}',
             'for_comma': 'uint8_t i; uint8_t j; void setup(){for(i=0,j=0;i<3;i++){}} void loop(){}',
             'break_outside': 'void setup(){break;} void loop(){}',
@@ -186,6 +190,14 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('#cvcc_wait_remaining = #v0',counted.stdout)
         self.assertEqual(counted.stdout.count('WHILE #cvcc_wait_remaining > 0'),2)
 
+    def test_do_while_control_flow(self):
+        result=self.compile((ROOT/'tests/fixtures/do_while.cvc').read_text())
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('cvcc_do0:\nv0 = v0 + 1\ncvcc_continue0:\nIF 0 THEN GOTO cvcc_do0',result.stdout)
+        self.assertIn('GOTO cvcc_continue1',result.stdout)
+        self.assertIn('cvcc_continue1:\nIF v1 < 3 THEN GOTO cvcc_do1',result.stdout)
+        self.assertIn('GOTO cvcc_break2',result.stdout)
+
     def test_adapter_rejects_other_targets_and_banking(self):
         for source in ['SG1000: equ 0\nCVBASIC_BANK_SWITCHING: equ 0', 'SG1000: equ 1\nCVBASIC_BANK_SWITCHING: equ 1']:
             with self.assertRaises(ValueError):
@@ -245,6 +257,14 @@ class RomTests(unittest.TestCase):
         import hashlib
         self.assertEqual(hashlib.sha256((dest/'program.sg').read_bytes()).hexdigest(),
                          '2f6b8572cb4f2a82383661587be1c5e845be0ecc975dea1455c0f4f1c73c66b8')
+
+    def test_do_while_rom(self):
+        dest=BUILD/'do-while'
+        command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'tests/fixtures/do_while.cvc','--out-dir',dest)
+        cvb=ROOT/'.work/deps/CVBasic'
+        command(BUILD/'reference-cvbasic','--sg1000',dest/'program.bas',dest/'reference.asm',str(cvb)+'/')
+        command('gasm80',dest/'reference.asm','-o',dest/'reference.sg')
+        self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
 
     def test_happy_face_exact_upstream_rom(self):
         # Upstream artwork stays in ignored build output; nothing is vendored.

@@ -1,0 +1,47 @@
+uint8_t once;
+uint8_t continued;
+uint8_t skipped;
+uint8_t outer;
+uint8_t inner;
+uint8_t nested;
+uint8_t index;
+uint8_t values[3] = {1, 1, 0};
+uint8_t early;
+uint8_t ticks;
+uint8_t mixed;
+
+void setup() {
+    do { once++; } while (0);
+    do { continued++; continue; skipped++; } while (continued < 3);
+    do { break; skipped++; } while (1);
+    do {
+        inner = 0;
+        do {
+            inner++;
+            if (inner == 2) { continue; }
+            if (inner == 4) { break; }
+            nested++;
+        } while (1);
+        outer++;
+    } while (outer < 2);
+    do { index++; } while (index < 3 && values[index]);
+    index = 255;
+    do { once++; } while (index < 3 && values[index]);
+    for (outer = 0; outer < 2; outer++) {
+        inner = 0;
+        do {
+            inner++;
+            while (inner < 2) { mixed++; break; }
+            if (inner == 2) { break; }
+            mixed++;
+        } while (inner < 3);
+        continue;
+        skipped++;
+    }
+    finish();
+}
+void finish() {
+    do { early = 1; return; } while (1);
+    early = 99;
+}
+void loop() { ticks++; waitVBlank(); }

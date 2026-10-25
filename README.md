@@ -175,14 +175,19 @@ errors, request origin checks and the static file allowlist. Set
   shift. Binary integer expressions use the wider operand's width; shifts
   retain the left operand's width. Counts outside the range are rejected.
   Parentheses in generated BASIC preserve the source expression precedence.
-- `if`/`else`, `while`, and `for (init; condition; update)` with optional
+- `if`/`else`, `while`, `do { ... } while (condition);`, and
+  `for (init; condition; update)` with optional
   clauses, nested loops, `break` and `continue`. Counters must be global; local
   declarations and comma expressions in the header are not supported.
   The condition is tested before each iteration; `continue` runs the for-update
   before testing again, and `break` exits the innermost loop.
+  A `do` loop executes its body at least once and tests its condition at the end;
+  its `continue` jumps to that final test. All loop kinds can be nested, and
+  `do` conditions support the same short-circuit logic as if/while/for.
   Unsigned counters wrap normally: use `uint16_t` for `i <= 255`, since a byte
   counter wraps to zero and cannot terminate that condition.
-  Loops lower to WHILE plus labels to preserve these C-like control-flow rules. Conditions use an integer value or one comparison:
+  Pre-test loops lower to WHILE plus labels; do loops use a body label and
+  a final conditional branch to preserve these C-like control-flow rules. Conditions use an integer value or one comparison:
   `==`, `!=`, `<`, `>`, `<=`, `>=`. Conditions also support `&&`, `||` and
   `!`, including nesting and truth tests of nonzero integers. AND/OR conditions
   lower to branches with left-to-right short-circuit evaluation, not BASIC
@@ -227,6 +232,11 @@ the backend's width rules; they do not provide short-circuit boolean evaluation.
 The `logic.cvc` example adds constant shifts and nested short-circuit conditions.
 
 ## Validation
+
+`do_while.cvc` covers a false first condition, continue-to-test, break, nested
+and mixed for/while/do loops, early return and short-circuit guarded array reads.
+Its ROM passes differential assembly and 180-frame state checks on SG-1000 NTSC
+and SC-3000 PAL.
 
 `waitVBlank()` and `waitVBlank(1)` lower identically to `waitFrame()`; the counter
 example keeps its exact baseline ROM hash. `wait_vblank.cvc` verifies zero-count
