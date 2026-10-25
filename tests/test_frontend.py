@@ -228,6 +228,21 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('v2 = v2 + 1\n#v1 = 0\ncvcc_case0_1:',result.stdout)
         self.assertIn('GOTO cvcc_continue5',result.stdout)
 
+    def test_controller_read(self):
+        result=self.compile('uint8_t p; uint8_t identity(uint8_t x){return x;} void setup(){} void loop(){waitVBlank(); p=controllerRead(1); p=identity(controllerRead(2)); if(p && controllerRead(1)){p=controllerRead(2)>>1;} controllerRead(1);}')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.count(' = CONT1'),3)
+        self.assertEqual(result.stdout.count(' = CONT2'),2)
+        self.assertIn('GOSUB cvcc_fn0',result.stdout)
+    def test_controller_rejections(self):
+        for call in ['controllerRead()', 'controllerRead(0)', 'controllerRead(3)', 'controllerRead(p)', 'controllerRead(1,2)']:
+            with self.subTest(call=call):
+                result=self.compile('uint8_t p; void setup(){p='+call+';} void loop(){}')
+                self.assertNotEqual(result.returncode,0)
+                self.assertEqual(result.stdout,'')
+        for declaration in ['uint8_t controllerRead;', 'uint8_t controllerRead(uint8_t p){return p;}']:
+            self.assertNotEqual(self.compile(declaration+' void setup(){} void loop(){}').returncode,0)
+
     def test_video_vram(self):
         result=self.compile((ROOT/'tests/fixtures/video_vram.cvc').read_text())
         self.assertEqual(result.returncode,0,result.stderr)

@@ -104,7 +104,7 @@ static void declare(Compiler *c,TSNode n) {
     if (kind(decl,"init_declarator")) { val=field(decl,"value"); decl=field(decl,"declarator"); }
     int array=kind(decl,"array_declarator"); TSNode name_node=array?field(decl,"declarator"):decl;
     char name[64]; if (!identifier(c,name_node,name)) return;
-    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead"};
+    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(name,reserved[i])) {
         error(c,n,"reserved entry point or builtin name"); return;
     }
@@ -141,7 +141,7 @@ static void function(Compiler *c,TSNode n) {
         *slot=body; return;
     }
     char id[64]; if (!identifier(c,name,id)) return;
-    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead"};
+    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(id,reserved[i])) { error(c,name,"reserved builtin name"); return; }
     for(unsigned i=0;i<c->function_count;i++) if(!strcmp(id,c->functions[i].name)) { error(c,name,"duplicate function"); return; }
     if(c->function_count==128) { error(c,name,"too many functions (maximum 128)"); return; }
@@ -198,7 +198,7 @@ static Symbol *access(Compiler *c,TSNode n,int writing) {
 }
 /* CVCC integers retain byte/word width rather than C integer promotions. */
 static unsigned width(Compiler *c,TSNode n) {
-    if(kind(n,"call_expression")) { int id=function_id(c,n); return id>=0 && c->functions[id].result==1?16:8; }
+    if(kind(n,"call_expression")) { if(equals(c,field(n,"function"),"controllerRead")) return 8; int id=function_id(c,n); return id>=0 && c->functions[id].result==1?16:8; }
     if(kind(n,"identifier") || kind(n,"subscript_expression")) {
         Symbol *s=lookup(c,kind(n,"identifier")?n:field(n,"argument"));
         return s && s->word?16:8;
@@ -288,9 +288,18 @@ static void user_call(Compiler *c,TSNode n,int value) {
         fprintf(c->out,"DIM %scvcc_t%u\n%scvcc_t%u = %scvcc_r%d\n",prefix,t,prefix,t,prefix,id);
     }
 }
+static void controller_read(Compiler *c,TSNode n) {
+    TSNode args=field(n,"arguments"); unsigned player=0;
+    if(children(args)!=1) { error(c,args,"controllerRead expects literal player 1 or 2"); return; }
+    if(!number(c,child(args,0),2,&player)) return;
+    if(!player) { error(c,args,"controllerRead expects literal player 1 or 2"); return; }
+    if(c->temp_count==2048) { error(c,n,"too many expression temporaries"); return; }
+    unsigned t=c->temp_count++; c->temps[t]=n; c->temp_bits[t]=8;
+    fprintf(c->out,"DIM cvcc_t%u\ncvcc_t%u = CONT%u\n",t,t,player);
+}
 static void prepare(Compiler *c,TSNode n) {
     if(c->failed || !has_call(n)) return;
-    if(kind(n,"call_expression")) { user_call(c,n,1); return; }
+    if(kind(n,"call_expression")) { if(equals(c,field(n,"function"),"controllerRead")) controller_read(c,n); else user_call(c,n,1); return; }
     if(kind(n,"binary_expression")) {
         snapshot(c,field(n,"left"));
         // Shift counts remain compile-time constants.
@@ -352,7 +361,8 @@ static void literal_string(Compiler *c,TSNode n) {
 }
 static void builtin(Compiler *c,TSNode n) {
     TSNode fn=field(n,"function"), args=field(n,"arguments"); unsigned count=children(args);
-    if(equals(c,fn,"videoMode") || equals(c,fn,"spriteFlicker")) {
+    if(equals(c,fn,"controllerRead")) { controller_read(c,n);
+    } else if(equals(c,fn,"videoMode") || equals(c,fn,"spriteFlicker")) {
         unsigned value;
         if(count!=1) { error(c,args,"expected one literal argument"); return; }
         int mode=equals(c,fn,"videoMode");

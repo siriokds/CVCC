@@ -296,6 +296,14 @@ project and original data remain in ignored local work directories.
   These lower to CVBasic's interrupt-protected bulk transfers. Large uploads
   belong in screen-disabled setup; frame-time transfers still need a timing budget.
   Numeric arguments can call helpers; their values are preserved in source order.
+- `controllerRead(1)` / `controllerRead(2)` returns an active-high byte mask
+  from the backend's VBlank-updated controller state: up `1`, right `2`, down
+  `4`, left `8`, fire 1 `64`, fire 2 `128`. The player number must be a literal.
+  Read after `waitVBlank()` and store the result to test multiple buttons from
+  one sample. Value calls work in helpers, conditions and arguments with the
+  same evaluation ordering as other calls. This does not wait or detect edges;
+  compare previous state in your game for press/release events.
+  Web player: click the screen; P1 arrows + Z/X, P2 WASD + F/G.
 - `clearScreen()`, `printAt(position, "ASCII text")`,
   `defineSprite(first, count, data)`, `sprite(index, y, x, pattern, color)`.
   Sprite API ordering follows CVBasic. Patterns are 16x16, 32 bytes each.

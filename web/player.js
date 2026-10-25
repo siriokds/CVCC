@@ -7,7 +7,7 @@ class CartridgePlayer {
     this.paused = false;
     this.muted = true;
     this.held = new Set();
-    this.keys = new Map([['ArrowUp',4],['ArrowDown',5],['ArrowLeft',6],['ArrowRight',7],['KeyZ',0],['KeyX',8]]);
+    this.keys = new Map([['ArrowUp',4],['ArrowDown',5],['ArrowLeft',6],['ArrowRight',7],['KeyZ',0],['KeyX',8],['KeyW',20],['KeyS',21],['KeyA',22],['KeyD',23],['KeyF',16],['KeyG',24]]);
     this.audioTime = 0;
     this.nodes = new Set();
     this.ready = typeof createGearSC3000 === 'function' ? createGearSC3000({locateFile:name=>'/player/'+name}).then(core=>{this.core=core;core._web_init();return this;}) : Promise.reject(new Error('Player Web non disponibile: indica la cartella dist di GearSC3000.'));
@@ -23,7 +23,7 @@ class CartridgePlayer {
     requestAnimationFrame(time=>this.tick(time));
   }
   releaseKeys(){this.held.clear();this.updatePad();}
-  updatePad(){let mask=0;for(const key of this.held)mask|=1<<this.keys.get(key);this.core?._web_pad(0,mask);}
+  updatePad(){const masks=[0,0];for(const key of this.held){const code=this.keys.get(key);masks[code>>4]|=1<<(code&15);}for(let port=0;port<2;port++)this.core?._web_pad(port,masks[port]);}
   flushAudio(){for(const node of this.nodes){try{node.stop();}catch{}}this.nodes.clear();this.audioTime=0;}
   async load(bytes){
     await this.ready;

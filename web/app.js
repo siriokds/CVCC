@@ -5,7 +5,7 @@
   let examples=[], current='square', currentFile='main.cvc', projectFiles={}, errorFile=null, busy=false, lastBuild=null, lastSource='', activeTab='diagnostics', errorLine=null;
   const outputs={diagnostics:'Pronto a compilare.',assembly:'Compila un programma per vedere il codice Z80.',basic:'Compila un programma per vedere il passaggio CVBasic.'};
   const escape=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:setup|loop|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite|videoMode|screenEnable|screenDisable|spriteFlicker|vdpWrite|vramPoke|vramWrite|vramRead)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
+  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:setup|loop|controllerRead|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite|videoMode|screenEnable|screenDisable|spriteFlicker|vdpWrite|vramPoke|vramWrite|vramRead)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
   function highlight(source){
     let result='',cursor=0;
     for(const match of source.matchAll(tokens)){
@@ -129,7 +129,7 @@
         $('fps').textContent=player.fps.toFixed(2)+' FPS';
         for(const id of ['pause','reset','sound'])$(id).disabled=false;
         $('pause').innerHTML='Ⅱ <span>Pausa</span>';
-        $('preview-note').textContent='ROM in esecuzione. Clicca sullo schermo per usare frecce e Z/X. La compilazione resta locale.';
+        $('preview-note').textContent='ROM in esecuzione. Clicca sullo schermo: P1 frecce + Z/X; P2 WASD + F/G. La compilazione resta locale.';
       }catch(error){
         outputs.diagnostics+='\n\nPlayer: '+error.message;
         $('preview-state').textContent='PLAYER NON DISPONIBILE';$('preview-state').className='preview-state';
