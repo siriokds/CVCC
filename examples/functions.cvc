@@ -1,0 +1,30 @@
+// A 16x16 outline square. Sprite bytes: left half, then right half.
+const uint8_t square[32] = {
+    255,128,128,128,128,128,128,128,128,128,128,128,128,128,128,255,
+    255,1,1,1,1,1,1,1,1,1,1,1,1,1,1,255
+};
+
+uint16_t tick;
+
+uint16_t advance(uint16_t value, uint16_t period) {
+    value++;
+    if (value == period) { return 0; }
+    return value;
+}
+uint8_t triangle(uint16_t value, uint16_t limit) {
+    if (value > limit) { return (limit << 1) - value; }
+    return value;
+}
+void drawPair(uint16_t phase) {
+    sprite(0, 64, 20 + triangle(phase, 204), 0, 10);
+    sprite(1, 144, 224 - triangle(phase, 204), 0, 7);
+}
+void setup() {
+    defineSprite(0, 1, square);
+    printAt(35, "Arguments / return");
+}
+void loop() {
+    waitVBlank();
+    tick = advance(tick, 408);
+    drawPair(tick);
+}

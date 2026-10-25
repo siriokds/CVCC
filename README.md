@@ -159,9 +159,21 @@ errors, request origin checks and the static file allowlist. Set
 
 - Exactly one `void setup()` and `void loop()`, with empty parameter lists.
   Setup runs once; loop repeats with a direct jump, without a call/return wrapper.
-- Additional `void name()` functions, defined before or after their callers.
-  Calls lower to GOSUB/PROCEDURE; recursion (including indirect cycles) is rejected.
-  `return;` exits a helper, ends setup, or starts the next loop iteration.
+- Helper functions return `void`, `uint8_t` or `uint16_t`, with up to 16 named
+  `uint8_t`/`uint16_t` scalar parameters passed by value. Definitions may follow
+  callers. Parameters are writable, scoped to their helper, and may shadow globals.
+  Calls lower to GOSUB/PROCEDURE with static parameter/result slots; recursion
+  (including indirect cycles) is rejected. This convention is not reentrant.
+  `return;` exits a void helper, ends setup, or starts the next loop iteration.
+  Numeric helpers use `return expression;`; all reachable exits must return a
+  value. The check is conservative: loops alone do not prove a return.
+  Calls work in arithmetic, array indices, conditions, switches and numeric
+  builtin arguments. Arguments and operands evaluate left to right, with saved
+  temporaries protecting nested calls and values from side effects. Logical
+  conditions retain short-circuit evaluation; loop conditions rerun calls each
+  iteration. Assignment indices and compound old values are saved before RHS
+  calls. Assignment to parameters/results narrows to the declared width; a
+  caller may ignore a numeric result. Temporaries consume RAM (no slot reuse yet).
 - Global `uint8_t` and `uint16_t` variables, optionally initialized with literals.
   Scalar `const` declarations require a literal initializer.
   Uninitialized globals are zeroed by the pinned SG-1000 runtime before setup.
@@ -226,9 +238,9 @@ Comparisons and logical operators are currently supported only as conditions,
 not as numeric expression values. Shift counts computed at runtime are rejected.
 Strings currently exclude escapes and non-ASCII characters.
 
-Function parameters, return values, locals, unsupported types, pointers, preprocessing, SFRs, events, banking and other constructs are rejected.
+Local declarations, array/reference/pointer parameters, default arguments, unsupported types, preprocessing, SFRs, events, banking and other constructs are rejected.
 Diagnostics contain source path and one-based line/column ranges (byte columns).
-Safety limits: 1 MiB source, 256 global symbols, 128 helper functions,
+Safety limits: 1 MiB source, 256 global symbols, 128 helper functions, 16 parameters per helper, 2048 expression temporaries,
 128 syntax levels, 64 statement levels, 8192 bytes per array; generated BASIC lines must fit the upstream lexer.
 These are prototype limits, not the final language specification.
 
@@ -245,7 +257,17 @@ The `logic.cvc` example adds constant shifts and nested short-circuit conditions
 The `states.cvc` workbench example moves a sprite around a rectangle using a
 switch-driven state machine, with both fall-through and direct returns.
 
+The `functions.cvc` workbench example draws two squares moving in opposite
+directions using `advance(value, period)`, `triangle(value, limit)` and
+`drawPair(phase)`.
+
 ## Validation
+
+`function_values.cvc` covers nested calls to the same helper, calls from helpers,
+byte/word arguments and results, narrowing, arithmetic intermediates, parameter
+shadowing and pass-by-value, short-circuit side effects, calls in loop conditions,
+array indices, switch selectors and VBlank counts. Its ROM is compared between
+Gasm80 and sjasmplus and its results checked in SG-1000 NTSC / SC-3000 PAL.
 
 `states.cvc` completes repeated circuits on SG-1000 NTSC and SC-3000 PAL,
 with 1,450 checked frames per model confirming one pixel per VBlank. A ROM

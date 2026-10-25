@@ -69,8 +69,16 @@ class FrontendTests(unittest.TestCase):
             'builtin_shadow': 'uint8_t waitFrame; void setup(){} void loop(){}',
             'word_initializer_range': 'uint16_t x=65536; void setup(){} void loop(){}',
             'literal_range': 'uint16_t x; void setup(){x=65536;} void loop(){}',
-            'function_params': 'void f(uint8_t x){} void setup(){} void loop(){}',
-            'function_value': 'uint8_t f(){return 1;} void setup(){} void loop(){}',
+            'missing_return': 'uint8_t f(uint8_t x){if(x){return 1;}} void setup(){} void loop(){}',
+            'bare_return': 'uint16_t f(){return;} void setup(){} void loop(){}',
+            'void_value': 'uint8_t x; void f(){} void setup(){x=f();} void loop(){}',
+            'parameter_scope': 'void f(uint8_t x){} void setup(){x=1;} void loop(){}',
+            'duplicate_parameter': 'void f(uint8_t x,uint16_t x){} void setup(){} void loop(){}',
+            'array_parameter': 'void f(uint8_t x[2]){} void setup(){} void loop(){}',
+            'pointer_parameter': 'void f(uint8_t *x){} void setup(){} void loop(){}',
+            'default_parameter': 'void f(uint8_t x=1){} void setup(){} void loop(){}',
+            'value_recursion': 'uint8_t f(uint8_t x){return g(x);} uint8_t g(uint8_t x){return f(x);} void setup(){} void loop(){}',
+            'switch_missing_return': 'uint8_t f(uint8_t x){switch(x){case 0:if(x){break;}return 1;default:return 2;}} void setup(){} void loop(){}',
             'return_value': 'void f(){return 1;} void setup(){} void loop(){}',
             'recursive': 'void f(){f();} void setup(){} void loop(){}',
             'indirect_recursion': 'void f(){g();} void g(){f();} void setup(){} void loop(){}',
@@ -220,6 +228,13 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('v2 = v2 + 1\n#v1 = 0\ncvcc_case0_1:',result.stdout)
         self.assertIn('GOTO cvcc_continue5',result.stdout)
 
+    def test_parameters_and_return_values(self):
+        result=self.compile((ROOT/'tests/fixtures/function_values.cvc').read_text())
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('cvcc_p0_0',result.stdout)
+        self.assertIn('cvcc_r0',result.stdout)
+        self.assertIn('cvcc_t',result.stdout)
+
     def test_function_epilogue_after_switch_return(self):
         result=self.compile('uint8_t state; void setup(){} void loop(){step();waitVBlank();} void step(){switch(state){case 0:state=1;break;default:return;}}')
         self.assertEqual(result.returncode,0,result.stderr)
@@ -299,6 +314,12 @@ class RomTests(unittest.TestCase):
         cvb=ROOT/'.work/deps/CVBasic'
         command(BUILD/'reference-cvbasic','--sg1000',dest/'program.bas',dest/'reference.asm',str(cvb)+'/')
         command('gasm80',dest/'reference.asm','-o',dest/'reference.sg')
+        self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
+
+    def test_function_values_rom(self):
+        dest=BUILD/'function-values'
+        command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'tests/fixtures/function_values.cvc','--out-dir',dest)
+        command('gasm80',dest/'program.gasm.asm','-o',dest/'reference.sg')
         self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
 
     def test_states_function_exit_has_ret(self):

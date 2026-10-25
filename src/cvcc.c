@@ -11,7 +11,7 @@
 extern const TSLanguage *tree_sitter_cpp(void);
 
 typedef struct { char name[64]; int array, size, initialized, word, constant; TSNode value; } Symbol;
-typedef struct { char name[64]; TSNode body, node; } Function;
+typedef struct { char name[64]; TSNode body, node; Symbol params[16]; unsigned arity; int result; } Function;
 typedef struct {
     const char *path;
     char *source;
@@ -21,6 +21,7 @@ typedef struct {
     TSNode setup, loop;
     Function functions[128];
     unsigned function_count;
+    TSNode temps[2048]; unsigned temp_bits[2048], temp_count;
     unsigned char calls[128][128], visited[128];
     unsigned loop_ids[64], loop_depth, break_ids[64], break_depth, next_loop, next_bool;
     int current_function, wait_counter_declared, switch_value_declared, failed;
@@ -51,6 +52,7 @@ static unsigned children(TSNode n) {
     return count;
 }
 static TSNode child(TSNode n,unsigned index) {
+    if(ts_node_is_null(n)) return (TSNode){0};
     for (unsigned i=0;i<ts_node_named_child_count(n);i++) {
         TSNode k=ts_node_named_child(n,i);
         if (!kind(k,"comment") && index--==0) return k;
@@ -66,6 +68,10 @@ static int identifier(Compiler *c,TSNode n,char *name) {
 }
 static Symbol *lookup(Compiler *c,TSNode n) {
     char name[64]; if (!identifier(c,n,name)) return NULL;
+    if(c->current_function>=0) {
+        Function *f=&c->functions[c->current_function];
+        for(unsigned i=0;i<f->arity;i++) if(!strcmp(name,f->params[i].name)) return &f->params[i];
+    }
     for (unsigned i=0;i<c->count;i++) if (!strcmp(name,c->symbols[i].name)) return &c->symbols[i];
     error(c,n,"undeclared identifier '%s'",name); return NULL;
 }
@@ -122,14 +128,15 @@ static void declare(Compiler *c,TSNode n) {
 }
 static void function(Compiler *c,TSNode n) {
     TSNode d=field(n,"declarator"), type=field(n,"type"), body=field(n,"body");
-    if (!equals(c,type,"void") || !kind(d,"function_declarator") || !kind(body,"compound_statement") || children(n)!=3) {
-        error(c,n,"functions must return void and have a body"); return;
+    if ((!equals(c,type,"void") && !equals(c,type,"uint8_t") && !equals(c,type,"uint16_t")) || !kind(d,"function_declarator") || !kind(body,"compound_statement") || children(n)!=3) {
+        error(c,n,"functions must return void, uint8_t or uint16_t and have a body"); return;
     }
-    if (children(d)!=2 || children(field(d,"parameters"))!=0) { error(c,d,"functions must have empty parameter lists and no qualifiers"); return; }
+    if (children(d)!=2) { error(c,d,"function qualifiers are unsupported"); return; }
     TSNode name=field(d,"declarator"); TSNode *slot=NULL;
     if (equals(c,name,"setup")) slot=&c->setup;
     else if (equals(c,name,"loop")) slot=&c->loop;
     if (slot) {
+        if(!equals(c,type,"void") || children(field(d,"parameters"))) { error(c,n,"entry points require void and no parameters"); return; }
         if (!ts_node_is_null(*slot)) { error(c,name,"duplicate entry point"); return; }
         *slot=body; return;
     }
@@ -139,11 +146,37 @@ static void function(Compiler *c,TSNode n) {
     for(unsigned i=0;i<c->function_count;i++) if(!strcmp(id,c->functions[i].name)) { error(c,name,"duplicate function"); return; }
     if(c->function_count==128) { error(c,name,"too many functions (maximum 128)"); return; }
     Function *f=&c->functions[c->function_count++]; strcpy(f->name,id); f->body=body; f->node=n;
+    f->result=equals(c,type,"void")?-1:equals(c,type,"uint16_t");
+    TSNode params=field(d,"parameters");
+    if(children(params)>16) { error(c,params,"maximum 16 parameters"); return; }
+    for(unsigned i=0;i<children(params);i++) {
+        TSNode param=child(params,i), pt=field(param,"type"), pn=field(param,"declarator");
+        if(!kind(param,"parameter_declaration") || children(param)!=2 || (!equals(c,pt,"uint8_t")&&!equals(c,pt,"uint16_t"))) { error(c,param,"parameters require named uint8_t or uint16_t scalars"); return; }
+        Symbol *sp=&f->params[f->arity];
+        if(!identifier(c,pn,sp->name)) return;
+        for(unsigned j=0;j<f->arity;j++) if(!strcmp(sp->name,f->params[j].name)) { error(c,pn,"duplicate parameter"); return; }
+        sp->word=equals(c,pt,"uint16_t"); f->arity++;
+    }
 }
 static void symbol_name(Compiler *c,Symbol *s) {
+    for(unsigned i=0;i<c->function_count;i++) for(unsigned j=0;j<c->functions[i].arity;j++)
+        if(s==&c->functions[i].params[j]) { fprintf(c->out,"%scvcc_p%u_%u",s->word?"#":"",i,j); return; }
     fprintf(c->out,"%s%c%u",s->word?"#":"",s->constant?(s->array?'d':'k'):'v',(unsigned)(s-c->symbols));
 }
 static void expression(Compiler *c,TSNode n);
+static int has_call(TSNode n) {
+    if(ts_node_is_null(n)) return 0;
+    if(kind(n,"call_expression")) return 1;
+    for(unsigned i=0;i<children(n);i++) if(has_call(child(n,i))) return 1;
+    return 0;
+}
+static int function_id(Compiler *c,TSNode n) {
+    for(unsigned i=0;i<c->function_count;i++) if(equals(c,field(n,"function"),c->functions[i].name)) return (int)i;
+    error(c,n,"unsupported value function call"); return -1;
+}
+static void prepare(Compiler *c,TSNode n);
+static void snapshot(Compiler *c,TSNode n);
+static void user_call(Compiler *c,TSNode n,int value);
 static Symbol *access(Compiler *c,TSNode n,int writing) {
     int indexed=kind(n,"subscript_expression");
     Symbol *s=lookup(c,indexed?field(n,"argument"):n); if(!s) return NULL;
@@ -165,6 +198,7 @@ static Symbol *access(Compiler *c,TSNode n,int writing) {
 }
 /* CVCC integers retain byte/word width rather than C integer promotions. */
 static unsigned width(Compiler *c,TSNode n) {
+    if(kind(n,"call_expression")) { int id=function_id(c,n); return id>=0 && c->functions[id].result==1?16:8; }
     if(kind(n,"identifier") || kind(n,"subscript_expression")) {
         Symbol *s=lookup(c,kind(n,"identifier")?n:field(n,"argument"));
         return s && s->word?16:8;
@@ -195,6 +229,7 @@ static void shift(Compiler *c,TSNode left,TSNode right,int to_left) {
 }
 static void expression(Compiler *c,TSNode n) {
     if (c->failed) return;
+    for(unsigned i=0;i<c->temp_count;i++) if(ts_node_eq(n,c->temps[i])) { fprintf(c->out,"%scvcc_t%u",c->temp_bits[i]==16?"#":"",i); return; }
     if (kind(n,"number_literal")) { unsigned v; if (number(c,n,65535,&v)) fprintf(c->out,"%u",v); }
     else if (kind(n,"identifier") || kind(n,"subscript_expression")) access(c,n,0);
     else if (kind(n,"parenthesized_expression") && children(n)==1) {
@@ -214,6 +249,54 @@ static void expression(Compiler *c,TSNode n) {
         fputs(complement?"(NOT ":"-",c->out);
         expression(c,field(n,"argument")); if(complement) fputc(')',c->out);
     } else error(c,n,"unsupported integer expression '%s'",ts_node_type(n));
+}
+
+/* Static call frames are safe because the complete call graph rejects recursion.
+   Each expression/argument is saved before another call can change its inputs. */
+static void snapshot(Compiler *c,TSNode n) {
+    if(c->failed) return;
+    for(unsigned i=0;i<c->temp_count;i++) if(ts_node_eq(n,c->temps[i])) return;
+    prepare(c,n);
+    for(unsigned i=0;i<c->temp_count;i++) if(ts_node_eq(n,c->temps[i])) return;
+    if(c->failed) return;
+    if(c->temp_count==2048) { error(c,n,"too many expression temporaries"); return; }
+    TSNode operand=n;
+    while(kind(operand,"parenthesized_expression")) operand=child(operand,0);
+    // Preserve the backend's full arithmetic intermediate until assignment;
+    // byte/word conversions happen at parameters, returns and destinations.
+    unsigned bits=(kind(operand,"binary_expression")||kind(operand,"unary_expression"))?16:width(c,n);
+    unsigned id=c->temp_count;
+    fprintf(c->out,"DIM %scvcc_t%u\n%scvcc_t%u = ",bits==16?"#":"",id,bits==16?"#":"",id);
+    expression(c,n); fputc('\n',c->out);
+    c->temps[id]=n; c->temp_bits[id]=bits; c->temp_count++;
+}
+static void user_call(Compiler *c,TSNode n,int value) {
+    int id=function_id(c,n); if(id<0) return;
+    Function *f=&c->functions[id]; TSNode args=field(n,"arguments");
+    if(children(args)!=f->arity) { error(c,args,"function expects %u arguments",f->arity); return; }
+    if(value && f->result<0) { error(c,n,"void function has no value"); return; }
+    if(c->current_function>=0) c->calls[c->current_function][id]=1;
+    for(unsigned i=0;i<f->arity;i++) snapshot(c,child(args,i));
+    for(unsigned i=0;i<f->arity;i++) {
+        symbol_name(c,&f->params[i]); fputs(" = ",c->out); expression(c,child(args,i)); fputc('\n',c->out);
+    }
+    fprintf(c->out,"GOSUB cvcc_fn%d\n",id);
+    if(value && !c->failed) {
+        if(c->temp_count==2048) { error(c,n,"too many expression temporaries"); return; }
+        unsigned t=c->temp_count++; c->temps[t]=n; c->temp_bits[t]=f->result?16:8;
+        const char *prefix=f->result?"#":"";
+        fprintf(c->out,"DIM %scvcc_t%u\n%scvcc_t%u = %scvcc_r%d\n",prefix,t,prefix,t,prefix,id);
+    }
+}
+static void prepare(Compiler *c,TSNode n) {
+    if(c->failed || !has_call(n)) return;
+    if(kind(n,"call_expression")) { user_call(c,n,1); return; }
+    if(kind(n,"binary_expression")) {
+        snapshot(c,field(n,"left"));
+        // Shift counts remain compile-time constants.
+        if(!equals(c,field(n,"operator"),"<<")&&!equals(c,field(n,"operator"),">>")) snapshot(c,field(n,"right"));
+    } else if(kind(n,"subscript_expression")) snapshot(c,child(field(n,"indices"),0));
+    else for(unsigned i=0;i<children(n);i++) prepare(c,child(n,i));
 }
 
 static void condition(Compiler *c,TSNode n) {
@@ -254,6 +337,7 @@ static void branch(Compiler *c,TSNode n,unsigned yes,unsigned no) {
         fprintf(c->out,"cvcc_bool%u:\n",next);
         branch(c,field(n,"right"),yes,no); return;
     }
+    prepare(c,n);
     fputs("IF ",c->out); condition(c,n);
     fprintf(c->out," THEN GOTO cvcc_bool%u\nGOTO cvcc_bool%u\n",yes,no);
 }
@@ -281,6 +365,7 @@ static void builtin(Compiler *c,TSNode n) {
         if(!c->wait_counter_declared) {
             fputs("DIM #cvcc_wait_remaining\n",c->out); c->wait_counter_declared=1;
         }
+        prepare(c,amount);
         fputs("#cvcc_wait_remaining = ",c->out); expression(c,amount);
         fputs("\nWHILE #cvcc_wait_remaining > 0\nWAIT\n#cvcc_wait_remaining = #cvcc_wait_remaining - 1\nWEND\n",c->out);
     } else if(equals(c,fn,"clearScreen")) {
@@ -298,20 +383,18 @@ static void builtin(Compiler *c,TSNode n) {
         fprintf(c->out,"DEFINE SPRITE %u,%u,d%u\n",first,total,(unsigned)(s-c->symbols));
     } else if (equals(c,fn,"sprite")) {
         if (count!=5) { error(c,args,"sprite expects index, y, x, pattern, color"); return; }
+        if(has_call(args)) for(unsigned i=0;i<5;i++) snapshot(c,child(args,i));
         fputs("SPRITE ",c->out);
         for (unsigned i=0;i<5;i++) { if(i) fputc(',',c->out); expression(c,child(args,i)); }
         fputc('\n',c->out);
     } else {
         for(unsigned i=0;i<c->function_count;i++) if(equals(c,fn,c->functions[i].name)) {
-            if(count) { error(c,args,"user functions expect no arguments"); return; }
-            if(c->current_function>=0) c->calls[c->current_function][i]=1;
-            fprintf(c->out,"GOSUB cvcc_fn%u\n",i); return;
+            user_call(c,n,0); return;
         }
         error(c,fn,"unsupported function call");
     }
 }
-/* Assignment indices cannot contain calls or updates, so compound lowering may
-   safely evaluate the same index twice. */
+/* Snapshot indices and old compound values before side-effecting calls. */
 static void effect(Compiler *c,TSNode e) {
     if(c->failed || ts_node_is_null(e)) return;
     if (kind(e,"assignment_expression") || kind(e,"update_expression")) {
@@ -324,12 +407,16 @@ static void effect(Compiler *c,TSNode e) {
         const char *basic[]={"+","-","AND","OR","XOR"};
         for(unsigned i=0;i<5;i++) if(equals(c,op,ops[i])) compound=basic[i];
         if ((!update&&!equals(c,op,"=")&&!compound&&!shifting) || (update&&!equals(c,op,"++")&&!equals(c,op,"--"))) { error(c,op,"unsupported assignment operator"); return; }
+        TSNode rhs=field(e,"right");
+        if(kind(target,"subscript_expression") && (has_call(target)||has_call(rhs))) snapshot(c,child(field(target,"indices"),0));
+        if((compound||shifting) && has_call(rhs)) snapshot(c,target);
+        prepare(c,rhs);
         if(!access(c,target,1)) return;
         fputs(" = ",c->out);
         if(update) { access(c,target,0); fprintf(c->out," %c 1",equals(c,op,"++")?'+':'-'); }
         else if(shifting) shift(c,target,field(e,"right"),equals(c,op,"<<="));
         else if(compound) {
-            fputc('(',c->out); access(c,target,0); fprintf(c->out," %s ",compound);
+            fputc('(',c->out); expression(c,target); fprintf(c->out," %s ",compound);
             expression(c,field(e,"right")); fputc(')',c->out);
         } else expression(c,field(e,"right"));
         fputc('\n',c->out);
@@ -349,7 +436,7 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
         /* constexpr/consteval are not part of the supported language. */
         for(unsigned i=0;i<ts_node_child_count(n);i++) if(equals(c,ts_node_child(n,i),"constexpr")||equals(c,ts_node_child(n,i),"consteval")) { error(c,n,"compile-time if is unsupported"); return; }
         TSNode cond=field(n,"condition"), alt=field(n,"alternative");
-        if(logical(c,cond)) {
+        if(logical(c,cond) || has_call(cond)) {
             unsigned yes=c->next_bool++, no=c->next_bool++, end=c->next_bool++;
             branch(c,cond,yes,no); fprintf(c->out,"cvcc_bool%u:\n",yes);
             statement(c,field(n,"consequence"),depth+1);
@@ -389,6 +476,7 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
         // Dispatch is completed before any case body runs, so nested switches
         // may safely reuse this scratch value without affecting fall-through.
         if(!c->switch_value_declared) { fputs("DIM #cvcc_switch_value\n",c->out); c->switch_value_declared=1; }
+        prepare(c,field(cond,"value"));
         fputs("#cvcc_switch_value = ",c->out); expression(c,field(cond,"value")); fputc('\n',c->out);
         for(unsigned i=0;i<count;i++) if((int)i!=fallback)
             fprintf(c->out,"IF #cvcc_switch_value = %u THEN GOTO cvcc_case%u_%u\n",values[i],id,i);
@@ -416,7 +504,7 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
         // A do-loop continue tests the condition; it must not restart the body.
         fprintf(c->out,"cvcc_continue%u:\n",id);
         TSNode cond=field(n,"condition");
-        if(logical(c,cond)) {
+        if(logical(c,cond) || has_call(cond)) {
             unsigned yes=c->next_bool++, no=c->next_bool++;
             branch(c,cond,yes,no);
             fprintf(c->out,"cvcc_bool%u:\nGOTO cvcc_do%u\ncvcc_bool%u:\n",yes,id,no);
@@ -439,7 +527,7 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
         c->loop_ids[c->loop_depth++]=id;
         c->break_ids[c->break_depth++]=id;
         TSNode cond=field(n,"condition");
-        if(logical(c,cond)) {
+        if(logical(c,cond) || has_call(cond)) {
             unsigned yes=c->next_bool++, no=c->next_bool++;
             fputs("WHILE 1\n",c->out); branch(c,cond,yes,no);
             fprintf(c->out,"cvcc_bool%u:\nGOTO cvcc_break%u\ncvcc_bool%u:\n",no,id,yes);
@@ -462,9 +550,46 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
             fprintf(c->out,"GOTO cvcc_continue%u\n",c->loop_ids[c->loop_depth-1]);
         }
     } else if(kind(n,"return_statement")) {
-        if(children(n)) { error(c,n,"void functions cannot return a value"); return; }
+        Function *f=c->current_function>=0?&c->functions[c->current_function]:NULL;
+        if(f && f->result>=0) {
+            if(children(n)!=1) { error(c,n,"numeric functions must return a value"); return; }
+            prepare(c,child(n,0));
+            fprintf(c->out,"%scvcc_r%d = ",f->result?"#":"",c->current_function);
+            expression(c,child(n,0)); fputc('\n',c->out);
+        } else if(children(n)) { error(c,n,"void functions cannot return a value"); return; }
         fputs(c->current_function<0?"GOTO cvcc_main_loop\n":"RETURN\n",c->out);
     } else error(c,n,"unsupported statement '%s'",ts_node_type(n));
+}
+/* Possible exits: fall-through, return, break, continue. Loops are
+   conservatively allowed to finish; switches consume their own breaks. */
+enum { FALL=1, RET=2, BRK=4, CONT=8 };
+static unsigned exits(TSNode n) {
+    if(ts_node_is_null(n)) return FALL;
+    if(kind(n,"return_statement")) return RET;
+    if(kind(n,"break_statement")) return BRK;
+    if(kind(n,"continue_statement")) return CONT;
+    if(kind(n,"compound_statement") || kind(n,"case_statement")) {
+        unsigned result=FALL;
+        for(unsigned i=0;i<children(n);i++) if(result&FALL)
+            result=(result&~FALL)|exits(child(n,i));
+        return result;
+    }
+    if(kind(n,"if_statement")) return exits(field(n,"consequence")) | exits(child(field(n,"alternative"),0));
+    if(kind(n,"switch_statement")) {
+        TSNode body=field(n,"body"); unsigned following=FALL, result=0; int fallback=0;
+        for(unsigned i=children(body);i>0;i--) {
+            TSNode k=child(body,i-1);
+            if(ts_node_is_null(field(k,"value"))) fallback=1;
+            unsigned current=exits(k);
+            following=(current&~FALL)|((current&FALL)?following:0);
+            result|=following;
+        }
+        if(!fallback || (result&BRK)) result|=FALL;
+        return result&~BRK;
+    }
+    if(kind(n,"while_statement") || kind(n,"for_statement") || kind(n,"do_statement"))
+        return FALL|(exits(field(n,"body"))&RET);
+    return FALL;
 }
 static void check_calls(Compiler *c,unsigned id) {
     if(c->visited[id]==2 || c->failed) return;
@@ -503,6 +628,14 @@ static int compile(Compiler *c,TSNode root) {
             unsigned v=0; number(c,s->array?child(s->value,(unsigned)j):s->value,s->word?65535:255,&v);
             symbol_name(c,s); if(s->array) fprintf(c->out,"(%d)",j);
             fprintf(c->out," = %u\n",v);
+        }
+    }
+    for(unsigned i=0;i<c->function_count;i++) {
+        Function *f=&c->functions[i];
+        for(unsigned j=0;j<f->arity;j++) { fputs("DIM ",c->out); symbol_name(c,&f->params[j]); fputc('\n',c->out); }
+        if(f->result>=0) {
+            fprintf(c->out,"DIM %scvcc_r%u\n",f->result?"#":"",i);
+            if(exits(f->body)!=RET) error(c,f->body,"numeric function may reach its end without returning a value");
         }
     }
     c->current_function=-1;

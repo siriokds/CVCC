@@ -1,0 +1,56 @@
+uint8_t x = 7;
+uint16_t nested;
+uint16_t paired;
+uint8_t narrow;
+uint16_t wide;
+uint8_t side;
+uint8_t loops;
+uint8_t guarded;
+uint8_t arr[4] = {10,20,30,40};
+uint8_t index;
+uint8_t selected;
+uint8_t frame;
+uint16_t preserved;
+uint8_t shadow;
+uint8_t passed;
+uint16_t math;
+uint16_t minus;
+uint16_t chained;
+
+uint16_t add(uint16_t a, uint16_t b) { return a + b; }
+uint8_t inc(uint8_t x) { x++; return x; }
+uint8_t mutate() { x = 100; side++; return 3; }
+uint8_t nextIndex() { index++; return index; }
+void setPassed(uint8_t v) { v++; passed = v; }
+uint8_t classify(uint16_t value) {
+    switch (value) {
+        case 0:
+        case 256: return 8;
+        default: return 9;
+    }
+}
+uint8_t less(uint8_t a, uint8_t b) {
+    if (a < b) { return 1; } else { return 0; }
+}
+uint16_t forward(uint16_t a) { return add(a, inc(2)); }
+void setup() {
+    math = add(250 + 10, 0);
+    minus = add(-(1), 0);
+    chained = forward(500);
+    nested = add(add(1000, 20), add(30, 4));
+    paired = inc(2) + inc(4);
+    narrow = inc(511);
+    wide = add(65535, 2);
+    preserved = x + mutate();
+    shadow = inc(4);
+    setPassed(9);
+    if (0 && mutate()) { guarded = 1; }
+    if (1 || mutate()) { guarded += 2; }
+    while (less(loops, 3)) { loops++; }
+    for (; less(loops, 6); loops = inc(loops)) { continue; }
+    do { loops++; } while (less(loops, 8));
+    arr[nextIndex()] += mutate();
+    selected = classify(add(255, 1));
+    switch (classify(1)) { case 9: selected++; break; default: selected=0; }
+}
+void loop() { waitVBlank(inc(0)); frame = inc(frame); }
