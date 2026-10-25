@@ -102,8 +102,8 @@ class FrontendTests(unittest.TestCase):
             'short_array': 'const uint8_t x[2]={0}; void setup(){} void loop(){}',
             'rom_write': 'const uint8_t x[1]={0}; void setup(){x=1;} void loop(){}',
             'rom_read': 'const uint8_t x[1]={0}; uint8_t y; void setup(){y=x;} void loop(){}',
-            'logical_short_circuit': 'uint8_t x; void setup(){if(x && x){x=1;}} void loop(){}',
-            'logical_not': 'uint8_t x; void setup(){if(!x){x=1;}} void loop(){}',
+            'logical_as_value': 'uint8_t x; void setup(){x=x && 1;} void loop(){}',
+            'logical_not_as_value': 'uint8_t x; void setup(){x=!x;} void loop(){}',
             'comparison_as_value': 'uint8_t x; void setup(){x=(x==1);} void loop(){}',
             'side_effect_expression': 'uint8_t x; void setup(){x=x++;} void loop(){}',
             'compound_assignment': 'uint8_t x; void setup(){x*=2;} void loop(){}',
@@ -119,7 +119,13 @@ class FrontendTests(unittest.TestCase):
             'continue_outside': 'void setup(){} void loop(){continue;}',
             'break_helper': 'void f(){break;} void setup(){while(1){f();}} void loop(){}',
             'for_bad_update': 'uint8_t i; void setup(){for(i=0;i<3;i*2){}} void loop(){}',
-            'shift': 'uint8_t i; void setup(){i=i<<1;} void loop(){}',
+            'shift_byte_range': 'uint8_t i; void setup(){i=i<<8;} void loop(){}',
+            'shift_word_range': 'uint16_t i; void setup(){i>>=16;} void loop(){}',
+            'shift_negative': 'uint8_t i; void setup(){i=i<<-1;} void loop(){}',
+            'shift_dynamic': 'uint8_t i; void setup(){i=i<<i;} void loop(){}',
+            'shift_bad_left': 'uint8_t i; void setup(){i=(i==1)<<1;} void loop(){}',
+            'dead_rhs_invalid': 'void setup(){if(1 || missing){}} void loop(){}',
+            'logical_arithmetic': 'uint8_t i; void setup(){if((i && 1)+1){}} void loop(){}',
             'compound_rom': 'const uint8_t a[1]={0}; void setup(){a[0]|=1;} void loop(){}',
             'compound_side_effect': 'uint8_t a[2]; uint8_t i; void setup(){a[i++]^=1;} void loop(){}',
             'preprocessor': '#define X 1\nvoid setup(){} void loop(){}',
@@ -151,6 +157,14 @@ class FrontendTests(unittest.TestCase):
                         'v9 = (NOT v7)', '#v10 = (NOT #v8)',
                         'v11 = (1 OR (2 XOR (3 AND 4)))']:
             self.assertIn(snippet, result.stdout)
+
+    def test_shifts_and_short_circuit(self):
+        result = self.compile((ROOT / 'tests/fixtures/shifts_logic.cvc').read_text())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('AND 255) * 128) AND 255)', result.stdout)
+        self.assertIn('AND 65535) / 32768) AND 65535)', result.stdout)
+        # Guards branch before a potentially invalid dynamic array read.
+        self.assertRegex(result.stdout, r'IF v10 < 3 THEN GOTO cvcc_bool\d+\nGOTO cvcc_bool\d+\ncvcc_bool\d+:\nIF v11\(v10\)')
 
     def test_adapter_rejects_other_targets_and_banking(self):
         for source in ['SG1000: equ 0\nCVBASIC_BANK_SWITCHING: equ 0', 'SG1000: equ 1\nCVBASIC_BANK_SWITCHING: equ 1']:
@@ -190,6 +204,14 @@ class RomTests(unittest.TestCase):
         dest = BUILD / 'for-bitwise'
         command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'tests/fixtures/for_bitwise.cvc', '--out-dir', dest)
         # Assemble the same CVBasic lowering with the independent assembler.
+        cvb = ROOT / '.work/deps/CVBasic'
+        command(BUILD / 'reference-cvbasic', '--sg1000', dest / 'program.bas', dest / 'reference.asm', str(cvb) + '/')
+        command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
+        self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
+
+    def test_shifts_logic_rom(self):
+        dest = BUILD / 'shifts-logic'
+        command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'tests/fixtures/shifts_logic.cvc', '--out-dir', dest)
         cvb = ROOT / '.work/deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', dest / 'program.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')

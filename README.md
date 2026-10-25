@@ -148,6 +148,12 @@ errors, request origin checks and the static file allowlist. Set
 - Decimal and hexadecimal literals in `0..65535`; `+`, `-`, unary minus,
   parentheses, assignment, and standalone `++`/`--`. Bitwise `&`, `|`, `^`,
   `~`, and compound assignments `+=`, `-=`, `&=`, `|=`, `^=` are supported.
+  Shifts `<<`, `>>`, `<<=`, `>>=` take a literal or scalar const count in
+  `0..7` for a byte operand and `0..15` for a word operand. Right shift fills
+  with zero; left shift discards bits beyond the operand width, even when
+  assigned to a wider destination. Compound operands are masked before the
+  shift. Binary integer expressions use the wider operand's width; shifts
+  retain the left operand's width. Counts outside the range are rejected.
   Parentheses in generated BASIC preserve the source expression precedence.
 - `if`/`else`, `while`, and `for (init; condition; update)` with optional
   clauses, nested loops, `break` and `continue`. Counters must be global; local
@@ -157,7 +163,10 @@ errors, request origin checks and the static file allowlist. Set
   Unsigned counters wrap normally: use `uint16_t` for `i <= 255`, since a byte
   counter wraps to zero and cannot terminate that condition.
   Loops lower to WHILE plus labels to preserve these C-like control-flow rules. Conditions use an integer value or one comparison:
-  `==`, `!=`, `<`, `>`, `<=`, `>=`.
+  `==`, `!=`, `<`, `>`, `<=`, `>=`. Conditions also support `&&`, `||` and
+  `!`, including nesting and truth tests of nonzero integers. AND/OR conditions
+  lower to branches with left-to-right short-circuit evaluation, not BASIC
+  bitwise operators. Both sides are still checked for source errors.
 - One-dimensional byte/word RAM arrays (`uint16_t values[N];`) and ROM arrays
   (`const uint16_t values[N] = {...};`), accessed with `values[index]`.
   Sizes are explicit positive literals. Optional RAM initializers and mandatory
@@ -171,12 +180,11 @@ errors, request origin checks and the static file allowlist. Set
 Names are case-sensitive and mapped to internal BASIC symbols. No header is
 needed for either integer type. Arithmetic uses CVBasic's unsigned byte/word
 semantics, including wraparound and truncation on assignment to a narrower type; it does **not** implement C integer promotions.
-Comparisons are supported only as conditions, not as numeric expression values.
+Comparisons and logical operators are currently supported only as conditions,
+not as numeric expression values. Shift counts computed at runtime are rejected.
 Strings currently exclude escapes and non-ASCII characters.
 
-Shifts (`<<`, `>>`), function parameters, return values, locals, unsupported
-types, pointers, short-circuit
-operators, preprocessing, SFRs, events, banking and other constructs are rejected.
+Function parameters, return values, locals, unsupported types, pointers, preprocessing, SFRs, events, banking and other constructs are rejected.
 Diagnostics contain source path and one-based line/column ranges (byte columns).
 Safety limits: 1 MiB source, 256 global symbols, 128 helper functions,
 128 syntax levels, 64 statement levels, 8192 bytes per array; generated BASIC lines must fit the upstream lexer.
@@ -190,7 +198,14 @@ The `masks.cvc` workbench example adds counted loops and AND/XOR masks to the
 moving formation. Bitwise operators operate on unsigned byte/word values using
 the backend's width rules; they do not provide short-circuit boolean evaluation.
 
+The `logic.cvc` example adds constant shifts and nested short-circuit conditions.
+
 ## Validation
+
+`shifts_logic.cvc` exercises byte/word shifts, compound shifts, width truncation,
+operator precedence, logical negation, guarded array reads and short-circuit
+conditions in if/for/while. Its ROM passes differential assembly and state
+checks after 180 frames on both SG-1000 NTSC and SC-3000 PAL.
 
 `for_bitwise.cvc` checks the full 0..255 iteration range with a word counter,
 zero-iteration and descending loops, a changing bound, omitted clauses, nested

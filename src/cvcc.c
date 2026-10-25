@@ -22,7 +22,7 @@ typedef struct {
     Function functions[128];
     unsigned function_count;
     unsigned char calls[128][128], visited[128];
-    unsigned loop_ids[64], loop_depth, next_loop;
+    unsigned loop_ids[64], loop_depth, next_loop, next_bool;
     int current_function, failed;
 } Compiler;
 
@@ -163,6 +163,36 @@ static Symbol *access(Compiler *c,TSNode n,int writing) {
     if(indexed) { fputc('(',c->out); expression(c,index); fputc(')',c->out); }
     return s;
 }
+/* CVCC integers retain byte/word width rather than C integer promotions. */
+static unsigned width(Compiler *c,TSNode n) {
+    if(kind(n,"identifier") || kind(n,"subscript_expression")) {
+        Symbol *s=lookup(c,kind(n,"identifier")?n:field(n,"argument"));
+        return s && s->word?16:8;
+    }
+    if(kind(n,"number_literal")) { unsigned v=0; number(c,n,65535,&v); return v>255?16:8; }
+    if(kind(n,"parenthesized_expression")) return width(c,child(n,0));
+    if(kind(n,"unary_expression")) return width(c,field(n,"argument"));
+    if(kind(n,"binary_expression")) {
+        unsigned left=width(c,field(n,"left"));
+        if(equals(c,field(n,"operator"),"<<")||equals(c,field(n,"operator"),">>")) return left;
+        unsigned right=width(c,field(n,"right")); return left>right?left:right;
+    }
+    error(c,n,"unsupported shift operand"); return 8;
+}
+static void shift(Compiler *c,TSNode left,TSNode right,int to_left) {
+    unsigned bits=width(c,left), count=0;
+    while(kind(right,"parenthesized_expression")) right=child(right,0);
+    if(kind(right,"identifier")) {
+        Symbol *s=lookup(c,right);
+        if(!s) return;
+        if(!s->constant || s->array) { error(c,right,"shift count must be a literal or scalar const"); return; }
+        if(!number(c,s->value,65535,&count)) return;
+    } else if(!number(c,right,65535,&count)) return;
+    if(count>=bits) { error(c,right,"shift count must be in 0..%u for this operand",bits-1); return; }
+    // Mask before shifting to preserve width even when the backend widens arithmetic.
+    fputs("(((",c->out); expression(c,left);
+    fprintf(c->out," AND %u) %c %u) AND %u)",bits==8?255:65535,to_left?'*':'/',1u<<count,bits==8?255:65535);
+}
 static void expression(Compiler *c,TSNode n) {
     if (c->failed) return;
     if (kind(n,"number_literal")) { unsigned v; if (number(c,n,65535,&v)) fprintf(c->out,"%u",v); }
@@ -171,6 +201,7 @@ static void expression(Compiler *c,TSNode n) {
         fputc('(',c->out); expression(c,child(n,0)); fputc(')',c->out);
     } else if (kind(n,"binary_expression")) {
         TSNode op=field(n,"operator");
+        if(equals(c,op,"<<")||equals(c,op,">>")) { shift(c,field(n,"left"),field(n,"right"),equals(c,op,"<<")); return; }
         const char *ops[]={"+","-","&","|","^"};
         const char *basic[]={"+","-","AND","OR","XOR"};
         const char *mapped=NULL;
@@ -199,6 +230,32 @@ static void condition(Compiler *c,TSNode n) {
         }
     }
     expression(c,n);
+}
+static int logical(Compiler *c,TSNode n) {
+    if(ts_node_is_null(n)) return 0;
+    if(equals(c,field(n,"operator"),"&&") || equals(c,field(n,"operator"),"||") || equals(c,field(n,"operator"),"!")) return 1;
+    for(unsigned i=0;i<children(n);i++) if(logical(c,child(n,i))) return 1;
+    return 0;
+}
+/* Emit branches, not BASIC AND/OR: the right side must be skipped at runtime. */
+static void branch(Compiler *c,TSNode n,unsigned yes,unsigned no) {
+    if(c->failed) return;
+    if(kind(n,"condition_clause")) {
+        if(children(n)!=1) { error(c,n,"declarations/initializers in conditions are unsupported"); return; }
+        n=field(n,"value");
+    }
+    if(kind(n,"parenthesized_expression")) { branch(c,child(n,0),yes,no); return; }
+    TSNode op=field(n,"operator");
+    if(kind(n,"unary_expression") && equals(c,op,"!")) { branch(c,field(n,"argument"),no,yes); return; }
+    if(kind(n,"binary_expression") && (equals(c,op,"&&") || equals(c,op,"||"))) {
+        unsigned next=c->next_bool++;
+        if(equals(c,op,"&&")) branch(c,field(n,"left"),next,no);
+        else branch(c,field(n,"left"),yes,next);
+        fprintf(c->out,"cvcc_bool%u:\n",next);
+        branch(c,field(n,"right"),yes,no); return;
+    }
+    fputs("IF ",c->out); condition(c,n);
+    fprintf(c->out," THEN GOTO cvcc_bool%u\nGOTO cvcc_bool%u\n",yes,no);
 }
 static void literal_string(Compiler *c,TSNode n) {
     char s[256]; if (!kind(n,"string_literal")||!text(c,n,s,sizeof s)) { error(c,n,"expected a plain string literal"); return; }
@@ -246,14 +303,16 @@ static void effect(Compiler *c,TSNode e) {
         int update=kind(e,"update_expression");
         TSNode target=field(e,update?"argument":"left");
         TSNode op=field(e,"operator");
+        int shifting=equals(c,op,"<<=")||equals(c,op,">>=");
         const char *compound=NULL;
         const char *ops[]={"+=","-=","&=","|=","^="};
         const char *basic[]={"+","-","AND","OR","XOR"};
         for(unsigned i=0;i<5;i++) if(equals(c,op,ops[i])) compound=basic[i];
-        if ((!update&&!equals(c,op,"=")&&!compound) || (update&&!equals(c,op,"++")&&!equals(c,op,"--"))) { error(c,op,"unsupported assignment operator"); return; }
+        if ((!update&&!equals(c,op,"=")&&!compound&&!shifting) || (update&&!equals(c,op,"++")&&!equals(c,op,"--"))) { error(c,op,"unsupported assignment operator"); return; }
         if(!access(c,target,1)) return;
         fputs(" = ",c->out);
         if(update) { access(c,target,0); fprintf(c->out," %c 1",equals(c,op,"++")?'+':'-'); }
+        else if(shifting) shift(c,target,field(e,"right"),equals(c,op,"<<="));
         else if(compound) {
             fputc('(',c->out); access(c,target,0); fprintf(c->out," %s ",compound);
             expression(c,field(e,"right")); fputc(')',c->out);
@@ -274,11 +333,20 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
     } else if(kind(n,"if_statement")) {
         /* constexpr/consteval are not part of the supported language. */
         for(unsigned i=0;i<ts_node_child_count(n);i++) if(equals(c,ts_node_child(n,i),"constexpr")||equals(c,ts_node_child(n,i),"consteval")) { error(c,n,"compile-time if is unsupported"); return; }
-        fputs("IF ",c->out); condition(c,field(n,"condition")); fputs(" THEN\n",c->out);
-        statement(c,field(n,"consequence"),depth+1);
-        TSNode alt=field(n,"alternative");
-        if(!ts_node_is_null(alt)) { fputs("ELSE\n",c->out); statement(c,child(alt,0),depth+1); }
-        fputs("END IF\n",c->out);
+        TSNode cond=field(n,"condition"), alt=field(n,"alternative");
+        if(logical(c,cond)) {
+            unsigned yes=c->next_bool++, no=c->next_bool++, end=c->next_bool++;
+            branch(c,cond,yes,no); fprintf(c->out,"cvcc_bool%u:\n",yes);
+            statement(c,field(n,"consequence"),depth+1);
+            fprintf(c->out,"GOTO cvcc_bool%u\ncvcc_bool%u:\n",end,no);
+            if(!ts_node_is_null(alt)) statement(c,child(alt,0),depth+1);
+            fprintf(c->out,"cvcc_bool%u:\n",end);
+        } else {
+            fputs("IF ",c->out); condition(c,cond); fputs(" THEN\n",c->out);
+            statement(c,field(n,"consequence"),depth+1);
+            if(!ts_node_is_null(alt)) { fputs("ELSE\n",c->out); statement(c,child(alt,0),depth+1); }
+            fputs("END IF\n",c->out);
+        }
     } else if(kind(n,"while_statement") || kind(n,"for_statement")) {
         int counted=kind(n,"for_statement");
         if(c->loop_depth==64) { error(c,n,"loop nesting exceeds 64"); return; }
@@ -290,10 +358,16 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
             effect(c,init);
         }
         c->loop_ids[c->loop_depth++]=id;
-        fputs("WHILE ",c->out);
         TSNode cond=field(n,"condition");
-        if(ts_node_is_null(cond)) fputs("1",c->out); else condition(c,cond);
-        fputc('\n',c->out);
+        if(logical(c,cond)) {
+            unsigned yes=c->next_bool++, no=c->next_bool++;
+            fputs("WHILE 1\n",c->out); branch(c,cond,yes,no);
+            fprintf(c->out,"cvcc_bool%u:\nGOTO cvcc_break%u\ncvcc_bool%u:\n",no,id,yes);
+        } else {
+            fputs("WHILE ",c->out);
+            if(ts_node_is_null(cond)) fputs("1",c->out); else condition(c,cond);
+            fputc('\n',c->out);
+        }
         statement(c,field(n,"body"),depth+1);
         fprintf(c->out,"cvcc_continue%u:\n",id);
         if(counted) effect(c,field(n,"update"));

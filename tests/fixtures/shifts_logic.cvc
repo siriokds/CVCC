@@ -1,0 +1,44 @@
+const uint8_t distance = 3;
+uint8_t byteValue = 0x81;
+uint16_t wordValue = 0x8001;
+uint8_t leftByte;
+uint16_t leftWord;
+uint8_t rightByte;
+uint16_t rightWord;
+uint16_t narrowShift;
+uint16_t wideShift;
+uint8_t flags;
+uint8_t index;
+uint8_t data[3] = {1, 1, 0};
+uint8_t visits;
+uint8_t ticks;
+uint8_t wrappedShift;
+uint16_t nestedShift;
+
+void setup() {
+    leftByte = byteValue << 1;
+    leftWord = wordValue << 1;
+    rightByte = byteValue >> distance;
+    rightWord = wordValue >> 15;
+    narrowShift = byteValue << 7;
+    wideShift = wordValue << 15;
+    wrappedShift = (byteValue + 255) >> 1;
+    nestedShift = (wordValue >> 8) << 1;
+    byteValue <<= 1;
+    wordValue >>= 1;
+    data[2] <<= 0;
+    if (leftByte == 2 && leftWord == 2) { flags |= 1; }
+    if (0 || 2 && 4) { flags |= 2; }
+    if (!(rightByte != 16 || rightWord != 1)) { flags |= 4; }
+    if (0 && data[index]) { flags = 99; }
+    else { flags |= 8; }
+    if (1 || data[index]) { flags |= 16; }
+    for (index = 0; index < 3 && data[index]; index++) { visits++; }
+    while (index > 0 && visits < 4) { index--; visits++; continue; }
+    if (!index && visits == 4) { flags |= 32; }
+    // The right side must never read outside the table at runtime.
+    index = 255;
+    if (index < 3 && data[index]) { flags = 98; }
+    if (index >= 3 || data[index]) { flags |= 64; }
+}
+void loop() { ticks++; waitFrame(); }
