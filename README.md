@@ -125,7 +125,10 @@ multi-user compilation service.
 Only the two specified player artifacts are served from the external directory;
 no emulator code, private game library or WebAssembly binary is copied into this
 repository. The player adapter uses its published `_web_*` ABI (SG-1000 1 KiB
-mapper, NTSC, RGB565 video, 48 kHz audio). The browser UI does not expose emulator
+mapper, NTSC, RGB565 video, 48 kHz audio). At ROM load, the adapter requests
+60 Hz through `_web_set_target_fps` and uses the effective rate returned by the
+core. Older player builds without that API retain native timing. Native emulator
+validation continues to use the original NTSC/PAL timing. The browser UI does not expose emulator
 MCP/debugger controls.
 
 With the workbench running, `python3 tests/test_web.py` verifies compilation,

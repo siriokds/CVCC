@@ -39,7 +39,11 @@ class CartridgePlayer {
       ok=core._web_load(ptr,bytes.length);
     }finally{core._free(ptr);}
     if(!ok)throw new Error('Il player non ha accettato la ROM.');
-    this.fps=core._web_fps();this.paused=false;this.running=true;this.lastTime=0;this.debt=0;
+    // Align the core clock before the first frame (the ABI resets the machine).
+    // Older external player builds retain their native timing.
+    const aligned=typeof core._web_set_target_fps==='function' ? core._web_set_target_fps(60) : 0;
+    this.fps=Number.isFinite(aligned)&&aligned>1 ? aligned : core._web_fps();
+    this.paused=false;this.running=true;this.lastTime=0;this.debt=0;
   }
   pause(){this.paused=!this.paused;this.releaseKeys();this.flushAudio();this.lastTime=0;this.debt=0;return this.paused;}
   reset(){this.core._web_reset();this.flushAudio();this.lastTime=0;this.debt=0;this.releaseKeys();}
