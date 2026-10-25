@@ -5,3 +5,22 @@
 .rom-format{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px;margin:4px 0 0}.rom-format select{min-width:0;max-width:65%;border:1px solid var(--border);border-radius:5px;padding:9px;background:var(--bg);color:var(--text);font:11px var(--mono)}.download-size{font:10px/1.5 var(--mono);color:var(--muted);margin:8px 0 12px}.rom-format select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 .project-folder{margin-top:6px;padding:9px 7px;color:var(--text)}.project-file{margin-top:1px;padding:7px 8px 7px 22px;font-size:10px;overflow-wrap:anywhere}.sidebar{width:245px}.workbar select{max-width:150px;background:var(--surface);color:var(--text);border:1px solid var(--border);padding:5px}#file-select{margin-left:6px}.project-name{margin-bottom:16px}
+
+/* Project explorer: nested folders, distinct file types and a clear selection. */
+#project-tree .file{display:flex;align-items:center;gap:5px;width:100%;height:22px;text-align:left;min-width:0;margin:0;padding:0 5px;border-radius:2px;font:12px/22px var(--sans)}
+#project-tree .file-children{list-style:none;margin:0 0 0 10px;padding:0 0 0 6px;border-left:1px solid #303b49}
+#project-tree .file-children li{margin:0;padding:0;min-width:0}
+#project-tree .project-file{padding-left:20px;overflow-wrap:normal}
+#project-tree .directory{color:#c7ced7}
+#project-tree .project-folder{color:#dce1e7;font-weight:550}
+#project-tree .file-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#project-tree .folder-arrow{width:10px;flex-shrink:0;color:#b7c3d2;font-size:12px}
+#project-tree .file-icon{width:16px;height:16px;flex-shrink:0;display:inline-flex;align-items:center;align-self:center;justify-content:center;padding:0;font:700 10px var(--mono)}
+#project-tree .icon-folder{color:#e6b96a}
+#project-tree .icon-folder svg{width:17px;height:17px;fill:currentColor;stroke:var(--panel);stroke-width:.7}
+#project-tree .icon-source{color:#83c8f5;border:1px solid #477393;border-radius:3px}
+#project-tree .icon-header{color:#b5a0e8;border:1px solid #6f5d98;border-radius:3px}
+#project-tree .icon-binary{color:#82c9a8;border:1px solid #487a63;border-radius:3px;font-size:9px}
+#project-tree .file.active{color:#f0f3f6;background:#303b48;border-color:transparent;box-shadow:none}
+#project-tree .file:focus-visible{outline:1px solid #5285a6;outline-offset:-1px}
+#project-tree .file:hover{background-color:#242c36}

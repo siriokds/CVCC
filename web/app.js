@@ -29,15 +29,77 @@
   }
   function updateCursor(){const prefix=editor.value.slice(0,editor.selectionStart);const lines=prefix.split('\n');$('cursor').textContent=`Ln ${lines.length}, Col ${lines.at(-1).length+1}`;}
   function syncScroll(){$('highlight').scrollTop=editor.scrollTop;$('highlight').scrollLeft=editor.scrollLeft;$('line-numbers').scrollTop=editor.scrollTop;}
+  // Folder state belongs to each project; switching files must not flatten it.
+  const openFolders=new Map(), closedProjects=new Set();
+  function foldersForProject(){
+    if(!openFolders.has(current))openFolders.set(current,new Set());
+    return openFolders.get(current);
+  }
+  function revealFile(name){
+    closedProjects.delete(current);
+    const parts=name.split('/');parts.pop();
+    for(let i=1;i<=parts.length;i++)foldersForProject().add(parts.slice(0,i).join('/'));
+  }
+  function fileIcon(kind,open=false){
+    const icon=document.createElement('span');icon.className='file-icon icon-'+kind;icon.setAttribute('aria-hidden','true');
+    if(kind==='folder'){
+      // Inline vector icons stay crisp and require no external assets.
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');
+      const path=document.createElementNS(svg.namespaceURI,'path');
+      path.setAttribute('d',open?'M3 7V5h6l2 2h10v3H7L3 19V7Zm0 12 4-9h15l-4 9H3Z':'M3 7V5h6l2 2h10v14H3V7Z');
+      svg.append(path);icon.append(svg);
+    }else icon.textContent=kind==='binary'?'01':kind==='header'?'H':'C';
+    return icon;
+  }
+  function treeButton(label,kind,open=false){
+    const button=document.createElement('button');button.type='button';button.className='file';
+    if(kind==='folder'){
+      const arrow=document.createElement('span');arrow.className='folder-arrow';arrow.textContent=open?'▾':'▸';arrow.setAttribute('aria-hidden','true');button.append(arrow);
+      button.setAttribute('aria-expanded',String(open));
+    }
+    button.append(fileIcon(kind,open));
+    const text=document.createElement('span');text.className='file-label';text.textContent=label;button.append(text);
+    return button;
+  }
   function renderTree(){
     const nav=$('project-tree');nav.replaceChildren();
     for(const project of examples){
-      const folder=document.createElement('button');folder.className='file project-folder';folder.textContent=(project.id===current?'▾ ':'▸ ')+project.id+'/';
-      folder.addEventListener('click',()=>choose(project.id));nav.append(folder);
-      if(project.id===current) for(const name of Object.keys(projectFiles).sort((a,b)=>a==='main.cvc'?-1:b==='main.cvc'?1:a.localeCompare(b))){
-        const file=document.createElement('button');file.className='file project-file'+(name===currentFile?' active':'');file.textContent=name;file.title=name;
-        file.addEventListener('click',()=>chooseFile(name));nav.append(file);
+      const expanded=project.id===current&&!closedProjects.has(project.id);
+      const folder=treeButton(project.id,'folder',expanded);folder.classList.add('project-folder');
+      folder.addEventListener('click',()=>{
+        if(busy)return;
+        if(project.id!==current){closedProjects.delete(project.id);choose(project.id);}
+        else{if(closedProjects.has(current))closedProjects.delete(current);else closedProjects.add(current);renderTree();}
+      });nav.append(folder);
+      if(!expanded)continue;
+      const root=new Map();
+      for(const name of Object.keys(projectFiles)){
+        const parts=name.split('/');let children=root;
+        parts.forEach((part,index)=>{
+          if(!children.has(part))children.set(part,{name:part,path:parts.slice(0,index+1).join('/'),children:new Map(),file:index===parts.length-1});
+          children=children.get(part).children;
+        });
       }
+      function renderChildren(children){
+        const list=document.createElement('ul');list.className='file-children';
+        const ordered=Array.from(children.values()).sort((a,b)=>a.path==='main.cvc'?-1:b.path==='main.cvc'?1:a.file!==b.file?(a.file?1:-1):a.name.localeCompare(b.name));
+        for(const node of ordered){
+          const item=document.createElement('li');list.append(item);
+          const open=!node.file&&foldersForProject().has(node.path);
+          const kind=!node.file?'folder':typeof projectFiles[node.path]!=='string'?'binary':node.name.endsWith('.h')?'header':'source';
+          const button=treeButton(node.name,kind,open);button.title=node.path;
+          button.classList.add(node.file?'project-file':'directory');
+          if(node.file&&node.path===currentFile){button.classList.add('active');button.setAttribute('aria-current','true');}
+          button.addEventListener('click',()=>{
+            if(busy)return;
+            if(node.file)chooseFile(node.path);
+            else{if(open)foldersForProject().delete(node.path);else foldersForProject().add(node.path);renderTree();}
+          });item.append(button);
+          if(open)item.append(renderChildren(node.children));
+        }
+        return list;
+      }
+      nav.append(renderChildren(root));
     }
   }
   function showFile(){
@@ -51,7 +113,7 @@
     editor.value=rows.join('\n');
   }
   function chooseFile(name){
-    if(busy)return;persist();currentFile=name;showFile();
+    if(busy)return;persist();currentFile=name;revealFile(name);showFile();
     $('current-name').textContent=current+'/'+name;$('file-select').value=name;
     editor.scrollTop=0;editor.scrollLeft=0;updateEditor();renderTree();
   }
@@ -62,7 +124,7 @@
       if(draft){for(const name of Object.keys(projectFiles))if(typeof projectFiles[name]==='string'&&typeof draft[name]==='string')projectFiles[name]=draft[name];}
       if(!draft&&Object.keys(projectFiles).length===1){const legacy=localStorage.getItem('cvcc-draft-'+id);if(legacy!==null)projectFiles['main.cvc']=legacy;}
     }catch{}
-    currentFile='main.cvc';showFile();
+    currentFile='main.cvc';closedProjects.delete(current);showFile();
     $('example-select').value=id;$('file-select').replaceChildren(...Object.keys(projectFiles).map(name=>new Option(name,name)));
     $('current-name').textContent=id+'/main.cvc';$('file-select').value=currentFile;
     editor.scrollTop=0;editor.scrollLeft=0;updateEditor();renderTree();

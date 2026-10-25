@@ -200,7 +200,8 @@ back to the original file and line. The raw `build/cvcc` executable still accept
 one already-expanded source. Limits: 128 files, 32 include levels, 1 MiB source
 and expanded text. Build metadata records hashes of all included files.
 
-The workbench shows project folders and their files. Editing/switching files
+The workbench shows a compact, expandable project explorer with nested folders,
+indentation guides and distinct source, header and binary icons. Editing/switching files
 preserves browser drafts; **Compila e avvia** always builds `main.cvc` with all
 current project files. Error navigation opens the relevant header. **↓ File**
 downloads the current file; **↓ Progetto** downloads a ZIP preserving paths.
