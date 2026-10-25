@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Local-only CVCC workbench. Compilation stays on this machine."""
 import argparse
+import io
+import zipfile
 import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -13,6 +15,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 from rom_exports import exports
+from project_source import read_project, validate_files
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_LOCK = threading.Lock()
@@ -43,9 +46,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, {'error': 'Local origin required'})
         route = urlsplit(self.path).path
         if route == '/api/config':
-            examples = [{'id': name, 'source': (ROOT / 'examples' / f'{name}.cvc').read_text()} for name in ('square', 'counter', 'patrol', 'masks', 'logic', 'states', 'functions')]
+            examples = [{'id': name, 'files': read_project(ROOT / 'examples' / name)} for name in ('square', 'counter', 'patrol', 'masks', 'logic', 'states', 'functions')]
             if self.server.local_example:
-                examples.append(dict(id=self.server.local_example.stem, source=self.server.local_example.read_text(), local=True))
+                examples.append(dict(id=self.server.local_example.stem, files={'main.cvc':self.server.local_example.read_text()}, local=True))
+            if self.server.project:
+                examples.append(dict(id=self.server.project.name, files=read_project(self.server.project), local=True))
             return self.send(200, dict(examples=examples, player_available=all((self.server.player / f).is_file() for f in ('core.js', 'core.wasm'))))
         files = {'/': ('index.html', 'text/html; charset=utf-8'),
                  '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
@@ -63,7 +68,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.allowed():
             return self.send(403, {'error': 'Local origin required'})
-        if urlsplit(self.path).path != '/api/compile':
+        route = urlsplit(self.path).path
+        if route not in ('/api/compile', '/api/project-download'):
             return self.send(404, {'error': 'Not found'})
         if self.headers.get_content_type() != 'application/json':
             return self.send(415, {'error': 'JSON required'})
@@ -72,25 +78,35 @@ class Handler(BaseHTTPRequestHandler):
             if length <= 0 or length > 2 * 1024 * 1024:
                 return self.send(413, {'error': 'Source exceeds request limit'})
             payload = json.loads(self.rfile.read(length))
-            source = payload.get('source')
-            if not isinstance(source, str) or len(source.encode()) > 1024 * 1024:
-                return self.send(400, {'error': 'Expected source text, at most 1 MiB'})
-        except (ValueError, AttributeError):
-            return self.send(400, {'error': 'Invalid JSON request'})
+            if not isinstance(payload, dict): raise ValueError('Expected JSON object')
+            if 'files' in payload:
+                files = validate_files(payload['files'])
+                if 'main.cvc' not in files: raise ValueError('Project requires main.cvc')
+            else:
+                files = validate_files({'main.cvc':payload.get('source')})
+        except (ValueError, AttributeError) as exc:
+            return self.send(400, {'error': str(exc)})
+        if route == '/api/project-download':
+            archive=io.BytesIO()
+            with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
+                for name,source in files.items(): z.writestr(name,source)
+            return self.send(200,archive.getvalue(),'application/zip')
         if not BUILD_LOCK.acquire(blocking=False):
             return self.send(409, {'error': 'Another build is running'})
         try:
             started = time.perf_counter()
             with tempfile.TemporaryDirectory(prefix='request-', dir=ROOT / '.work/web') as tmp:
                 work = Path(tmp)
-                path = work / 'sketch.cvc'
-                path.write_text(source)
+                project=work/'project';project.mkdir()
+                for name,source in files.items():
+                    file=project/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text(source)
+                path = project / 'main.cvc'
                 out = work / 'result'
                 result = subprocess.run([sys.executable, str(ROOT / 'tools/build_rom.py'), str(path), '--out-dir', str(out)], cwd=ROOT, capture_output=True, text=True, timeout=30)
                 if result.returncode:
-                    message = (result.stderr or result.stdout).replace(str(path), 'sketch.cvc')
-                    match = re.search(r'sketch.cvc:(\d+):(\d+): error: (.+)', message)
-                    return self.send(422, dict(error=message.strip(), line=int(match[1]) if match else None, column=int(match[2]) if match else None))
+                    message = (result.stderr or result.stdout).replace(str(project)+'/', '')
+                    match = re.search(r'([^\n:]+\.(?:cvc|h)):(\d+):(\d+): error: (.+)', message)
+                    return self.send(422, dict(error=message.strip(), file=match[1] if match else None, line=int(match[2]) if match else None, column=int(match[3]) if match else None))
                 metadata = json.loads((out / 'build.json').read_text())
                 symbols = dict((name, int(address,16)) for name,address in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$', (out/'program.sym').read_text(), re.M))
                 rom = (out/'program.sg').read_bytes()
@@ -115,7 +131,13 @@ def main():
     parser.add_argument('--port', type=int, default=8844)
     parser.add_argument('--player-dist', type=Path, required=True, help='Existing GearSC3000 web dist; served read-only, never copied')
     parser.add_argument('--local-example', type=Path, help='Optional local .cvc example; source is served only by this local workbench')
+    parser.add_argument('--project', type=Path, help='Local project folder containing main.cvc and headers')
     args = parser.parse_args()
+    if args.project:
+        read_project(args.project)
+        if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]*',args.project.name) or args.project.name in ('square','counter','patrol','masks','logic','states','functions'):
+            parser.error('project folder must have a unique simple name')
+    if args.project and args.local_example: parser.error('use either --project or --local-example')
     if args.local_example and (args.local_example.suffix != '.cvc' or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]*', args.local_example.stem) or args.local_example.stem in ('square','counter','patrol','masks','logic','states','functions') or not args.local_example.is_file()):
         parser.error('local example must be an existing .cvc file with a unique simple name')
     if not (ROOT/'build/cvcc').is_file():
@@ -123,6 +145,7 @@ def main():
     (ROOT/'.work/web').mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     server.player = args.player_dist.resolve()
+    server.project = args.project.resolve() if args.project else None
     server.local_example = args.local_example.resolve() if args.local_example else None
     print(f'CVCC Workbench: http://127.0.0.1:{args.port}', flush=True)
     try:

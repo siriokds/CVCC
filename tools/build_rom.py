@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from gasm80_to_sjasmplus import adapt
+from project_source import expand, remap
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,7 +30,15 @@ def main():
     args = parser.parse_args()
     source, dest, deps = args.source.resolve(), args.out_dir.resolve(), args.deps.resolve()
     # Validate before touching the destination. Rejected input never yields a ROM.
-    basic = run([args.frontend.resolve(), source]).stdout
+    if source.is_dir(): source = source/'main.cvc'
+    expanded, mapping, inputs = expand(source)
+    with tempfile.TemporaryDirectory(prefix='cvcc-source-') as temporary:
+        flattened = Path(temporary)/'main.cvc'
+        flattened.write_text(expanded)
+        compiled = subprocess.run([str(args.frontend.resolve()), str(flattened)], capture_output=True, text=True)
+        if compiled.returncode:
+            raise RuntimeError(remap(compiled.stderr or compiled.stdout, flattened, mapping))
+        basic = compiled.stdout
     lock = json.loads((ROOT / 'dependencies.lock.json').read_text())
     for name, spec in lock.items():
         actual = run(['git', '-C', deps / name, 'rev-parse', 'HEAD']).stdout.strip()
@@ -57,6 +66,7 @@ def main():
         if not rom or len(rom) > 32768:
             raise RuntimeError('prototype requires a nonempty ROM of at most 32 KiB')
         metadata = dict(source=str(source), source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+                        project_files={name:hashlib.sha256(text.encode()).hexdigest() for name,text in inputs.items()},
                         frontend_sha256=hashlib.sha256(args.frontend.resolve().read_bytes()).hexdigest(),
                         dependencies=lock, assembler=run([assembler, '--version']).stdout.strip(),
                         assembler_sha256=hashlib.sha256(Path(assembler).read_bytes()).hexdigest(),
@@ -72,5 +82,5 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise SystemExit(str(exc))

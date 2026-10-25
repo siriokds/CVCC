@@ -33,7 +33,7 @@ class FrontendTests(unittest.TestCase):
         return subprocess.run([str(FRONTEND), str(self.path)], capture_output=True, text=True)
 
     def test_counter_golden(self):
-        result = self.compile((ROOT / 'examples/counter.cvc').read_text())
+        result = self.compile((ROOT / 'examples/counter/main.cvc').read_text())
         self.assertEqual(result.returncode, 0, result.stderr)
         output = '\n'.join(line for line in result.stdout.splitlines() if not line.startswith("'")) + '\n'
         self.assertEqual(output, (ROOT / 'tests/fixtures/counter.bas').read_text())
@@ -281,7 +281,7 @@ class RomTests(unittest.TestCase):
 
     def test_counter_against_handwritten_basic(self):
         dest = BUILD / 'test-counter'
-        command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'examples/counter.cvc', '--out-dir', dest)
+        command(sys.executable, ROOT / 'tools/build_rom.py', ROOT / 'examples/counter/main.cvc', '--out-dir', dest)
         cvb = ROOT / '.work/deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', ROOT / 'tests/fixtures/counter.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
@@ -313,7 +313,7 @@ class RomTests(unittest.TestCase):
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
 
     def test_wait_vblank_alias_rom(self):
-        source=(ROOT/'examples/counter.cvc').read_text().replace('waitFrame()', 'waitVBlank()')
+        source=(ROOT/'examples/counter/main.cvc').read_text().replace('waitFrame()', 'waitVBlank()')
         path=BUILD/'counter-vblank.cvc';path.write_text(source)
         dest=BUILD/'counter-vblank'
         command(sys.executable,ROOT/'tools/build_rom.py',path,'--out-dir',dest)
@@ -351,7 +351,7 @@ class RomTests(unittest.TestCase):
 
     def test_states_function_exit_has_ret(self):
         dest=BUILD/'states'
-        command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'examples/states.cvc','--out-dir',dest)
+        command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'examples/states/main.cvc','--out-dir',dest)
         symbols=dict((key,int(address,16)) for key,address in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$',(dest/'program.sym').read_text(),re.M))
         rom=(dest/'program.sg').read_bytes()
         self.assertEqual(rom[symbols['CVB_CVCC_BREAK0']],0xC9)  # RET, not sprite data.
@@ -363,7 +363,7 @@ class RomTests(unittest.TestCase):
         rows = re.findall(r'BITMAP "([.X]+)"', original)
         self.assertEqual(len(rows), 16)
         data = [int(row[a:a+8].replace('.', '0').replace('X', '1'), 2) for a in (0, 8) for row in rows]
-        source = (ROOT / 'examples/square.cvc').read_text()
+        source = (ROOT / 'examples/square/main.cvc').read_text()
         source = re.sub(r'const uint8_t square\[32\] = \{.*?\};', 'const uint8_t square[32] = {' + ','.join(map(str,data)) + '};', source, flags=re.S)
         source = source.replace('CVCC moving square', 'Happy face!')
         path = BUILD / 'happy_face.cvc'

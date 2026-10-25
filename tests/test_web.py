@@ -3,6 +3,8 @@ import base64
 import hashlib
 import http.client
 import json
+import io
+import zipfile
 import os
 from pathlib import Path
 import unittest
@@ -22,7 +24,7 @@ class WebTests(unittest.TestCase):
             connection.close()
 
     def test_compile_real_rom(self):
-        source = (ROOT / 'examples/counter.cvc').read_text()
+        source = (ROOT / 'examples/counter/main.cvc').read_text()
         status, body = self.request('POST', '/api/compile', json.dumps({'source': source}), {'Content-Type':'application/json'})
         self.assertEqual(status, 200, body)
         result = json.loads(body)
@@ -53,6 +55,22 @@ class WebTests(unittest.TestCase):
         self.assertEqual(result['line'], 1)
         self.assertNotIn('rom', result)
         self.assertIn('unsupported function call', result['error'])
+
+    def test_project_headers_diagnostics_and_zip(self):
+        files={'main.cvc':'#include "data/value.h"\nuint8_t x; void setup(){x=VALUE;} void loop(){waitFrame();}',
+               'data/value.h':'#pragma once\nconst uint8_t VALUE=7;'}
+        status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,200,body)
+        status,body=self.request('POST','/api/project-download',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,200,body)
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            self.assertEqual({name:archive.read(name).decode() for name in archive.namelist()},files)
+        files['data/value.h']='const uint8_t VALUE=7;\nvoid broken(){unknown=1;}'
+        status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,422,body)
+        result=json.loads(body);self.assertEqual(result['file'],'data/value.h');self.assertEqual(result['line'],2)
+        files['../escape.h']=''
+        self.assertEqual(self.request('POST','/api/project-download',json.dumps({'files':files}),{'Content-Type':'application/json'})[0],400)
 
     def test_no_arbitrary_files_or_cross_origin(self):
         self.assertEqual(self.request('GET', '/../../.git/config')[0],404)

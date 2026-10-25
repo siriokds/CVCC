@@ -86,7 +86,7 @@ for name, dependency in json.loads(Path('dependencies.lock.json').read_text()).i
                     'checkout', '--detach', dependency['commit']], check=True)
 PY
 ./tools/build_frontend.sh
-python3 tools/build_rom.py examples/square.cvc --out-dir build/square
+python3 tools/build_rom.py examples/square/main.cvc --out-dir build/square
 ```
 
 Load `build/square/program.sg` in an SG-1000/SC-3000 emulator with the standard
@@ -98,7 +98,7 @@ Reassemble the saved assembly from its output directory with
 The frontend alone writes BASIC to stdout, with diagnostics on stderr:
 
 ```sh
-build/cvcc examples/counter.cvc > build/counter.bas
+build/cvcc examples/counter/main.cvc > build/counter.bas
 python3 tests/test_frontend.py
 ```
 
@@ -154,6 +154,42 @@ MCP/debugger controls.
 With the workbench running, `python3 tests/test_web.py` verifies compilation,
 errors, request origin checks and the static file allowlist. Set
 `CVCC_WEB_TEST_PORT` when using a nondefault server port.
+
+## Projects and includes
+
+A project is a folder with a `main.cvc` entry point. For example:
+
+```text
+airsea/
+  main.cvc
+  data/
+    patterns.h
+    sprites.h
+    screen.h
+    colors.h
+    title.h
+```
+
+Use `#include "data/patterns.h"` to separate data or helper definitions.
+Includes resolve relative to the including file and must remain inside the
+project directory. Headers may use `#pragma once`; otherwise inclusion is
+textual and repeated declarations are errors. Nested includes are supported;
+cycles and missing files produce diagnostics. This is not a macro preprocessor:
+angle-bracket includes, `#define` and conditional directives are not supported.
+
+Build a folder with `python3 tools/build_rom.py examples/functions --out-dir build/functions`.
+The build driver expands includes before Tree-sitter parsing and maps errors
+back to the original file and line. The raw `build/cvcc` executable still accepts
+one already-expanded source. Limits: 128 files, 32 include levels, 1 MiB source
+and expanded text. Build metadata records hashes of all included files.
+
+The workbench shows project folders and their files. Editing/switching files
+preserves browser drafts; **Compila e avvia** always builds `main.cvc` with all
+current project files. Error navigation opens the relevant header. **↓ File**
+downloads the current file; **↓ Progetto** downloads a ZIP preserving paths.
+Browser edits do not silently overwrite the original files on disk.
+Launch with `--project /absolute/path/airsea` to open a local project. Air-Sea's
+project and original data remain in ignored local work directories.
 
 ## Supported subset
 
@@ -254,26 +290,26 @@ Comparisons and logical operators are currently supported only as conditions,
 not as numeric expression values. Shift counts computed at runtime are rejected.
 Strings currently exclude escapes and non-ASCII characters.
 
-Local declarations, array/reference/pointer parameters, default arguments, unsupported types, preprocessing, SFRs, events, banking and other constructs are rejected.
+Local declarations, array/reference/pointer parameters, default arguments, unsupported types, macro preprocessing, SFRs, events, banking and other constructs are rejected.
 Diagnostics contain source path and one-based line/column ranges (byte columns).
 Safety limits: 1 MiB source, 256 global symbols, 128 helper functions, 16 parameters per helper, 2048 expression temporaries,
 128 syntax levels, 64 statement levels, 8192 bytes per array; generated BASIC lines must fit the upstream lexer.
 These are prototype limits, not the final language specification.
 
-The `patrol.cvc` workbench example combines helper functions, indexed RAM byte
+The `examples/patrol/main.cvc` workbench example combines helper functions, indexed RAM byte
 arrays and a ROM word table with a 16-bit frame counter. Available RAM remains
 machine-dependent: the SG-1000 backend checks the total allocation at build time.
 
-The `masks.cvc` workbench example adds counted loops and AND/XOR masks to the
+The `examples/masks/main.cvc` workbench example adds counted loops and AND/XOR masks to the
 moving formation. Bitwise operators operate on unsigned byte/word values using
 the backend's width rules; they do not provide short-circuit boolean evaluation.
 
-The `logic.cvc` example adds constant shifts and nested short-circuit conditions.
+The `examples/logic/main.cvc` example adds constant shifts and nested short-circuit conditions.
 
-The `states.cvc` workbench example moves a sprite around a rectangle using a
+The `examples/states/main.cvc` workbench example moves a sprite around a rectangle using a
 switch-driven state machine, with both fall-through and direct returns.
 
-The `functions.cvc` workbench example draws two squares moving in opposite
+The `examples/functions/main.cvc` workbench example draws two squares moving in opposite
 directions using `advance(value, period)`, `triangle(value, limit)` and
 `drawPair(phase)`.
 
@@ -293,7 +329,7 @@ shadowing and pass-by-value, short-circuit side effects, calls in loop condition
 array indices, switch selectors and VBlank counts. Its ROM is compared between
 Gasm80 and sjasmplus and its results checked in SG-1000 NTSC / SC-3000 PAL.
 
-`states.cvc` completes repeated circuits on SG-1000 NTSC and SC-3000 PAL,
+`examples/states/main.cvc` completes repeated circuits on SG-1000 NTSC and SC-3000 PAL,
 with 1,450 checked frames per model confirming one pixel per VBlank. A ROM
 regression checks the helper exit contains RET: an explicit BASIC RETURN
 prevents CVBasic from omitting the epilogue after a return followed by a live

@@ -12,19 +12,12 @@
 <div class="workspace">
 <aside class="sidebar">
   <div class="sidebar-title">PROGETTO <span>01</span></div>
-  <div class="project-name"><span class="folder-icon">▱</span> Il mio primo gioco</div>
-  <div class="section-label">ESEMPI</div>
-  <button class="file active" data-example="square"><span class="file-icon">C+</span><span>square.cvc<small>Sprite in movimento</small></span><span class="file-dot"></span></button>
-  <button class="file" data-example="counter"><span class="file-icon">C+</span><span>counter.cvc<small>Il primo loop</small></span><span class="file-dot"></span></button>
-  <button class="file" data-example="patrol"><span class="file-icon">C+</span><span>patrol.cvc<small>Funzioni, array e 16 bit</small></span><span class="file-dot"></span></button>
-  <button class="file" data-example="masks"><span class="file-icon">C+</span><span>masks.cvc<small>Cicli for e maschere</small></span><span class="file-dot"></span></button>
-  <button class="file" data-example="logic"><span class="file-icon">C+</span><span>logic.cvc<small>Shift e condizioni logiche</small></span><span class="file-dot"></span></button>
-  <button class="file" data-example="functions"><span class="file-icon">C+</span><span>functions.cvc<small>Parametri e valori di ritorno</small></span><span class="file-dot"></span></button>
-  <button class="file" data-example="states"><span class="file-icon">C+</span><span>states.cvc<small>Switch e macchina a stati</small></span><span class="file-dot"></span></button>
+  <div class="project-name">▱ Progetti CVCC</div>
+  <nav id="project-tree" aria-label="File dei progetti"></nav>
   <div class="sidebar-bottom"><span class="section-label">IL PUNTO DI PARTENZA</span><p>Un <code>setup()</code>.<br>Un <code>loop()</code>.<br>La tua prossima cartuccia.</p><button id="reference-button" class="reference-button">Riferimento API <span>↗</span></button></div>
 </aside>
 <main>
-  <div class="workbar"><div><span class="crumb">WORKSPACE</span><span class="slash">/</span><span id="current-name">square.cvc</span><select id="example-select" aria-label="Scegli esempio"><option value="square">square.cvc</option><option value="counter">counter.cvc</option><option value="patrol">patrol.cvc</option><option value="masks">masks.cvc</option><option value="logic">logic.cvc</option><option value="states">states.cvc</option><option value="functions">functions.cvc</option></select><span id="dirty-mark" hidden>●</span></div><div class="work-actions"><button id="save-source" class="subtle" title="Scarica il sorgente">↓ Sorgente</button><button id="compile" class="primary" disabled><span class="play-icon">▶</span><span id="compile-label">Compila e avvia</span><kbd>⌘ ↵</kbd></button></div></div>
+  <div class="workbar"><div><span class="crumb">WORKSPACE</span><span class="slash">/</span><span id="current-name">square.cvc</span><select id="example-select" aria-label="Scegli progetto"></select><select id="file-select" aria-label="Scegli file"></select><span id="dirty-mark" hidden>●</span></div><div class="work-actions"><button id="save-source" class="subtle" title="Scarica il file corrente">↓ File</button><button id="save-project" class="subtle">↓ Progetto</button><button id="compile" class="primary" disabled><span class="play-icon">▶</span><span id="compile-label">Compila e avvia</span><kbd>⌘ ↵</kbd></button></div></div>
   <div class="panels">
     <section class="source-panel" aria-label="Editor sorgente">
       <div class="panel-heading"><span class="panel-index">01</span><h1>Sorgente</h1><span class="language">CVCC / C-LIKE</span></div>
