@@ -31,6 +31,20 @@ class WebTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(rom).hexdigest(), '2f6b8572cb4f2a82383661587be1c5e845be0ecc975dea1455c0f4f1c73c66b8')
         self.assertEqual(result['sha256'], hashlib.sha256(rom).hexdigest())
         self.assertIn('IF v0 < 100', result['basic'])
+        self.assertEqual([item['size'] for item in result['exports']], [8192,16384,32768,49152])
+        for item in result['exports']:
+            exported=base64.b64decode(item['rom'])
+            self.assertEqual(len(exported),item['size'])
+            self.assertEqual(exported[:result['code_bytes']],rom[:result['code_bytes']])
+        self.assertEqual(base64.b64decode(result['exports'][2]['rom']),rom)
+
+    def test_export_sizes_follow_payload(self):
+        source='const uint8_t data[8192]={' + ','.join(['42']*8192) + '}; void setup(){} void loop(){waitFrame();}'
+        status, body=self.request('POST','/api/compile',json.dumps({'source':source}),{'Content-Type':'application/json'})
+        self.assertEqual(status,200,body)
+        result=json.loads(body)
+        self.assertGreater(result['code_bytes'],8192)
+        self.assertEqual([item['size'] for item in result['exports']],[16384,32768,49152])
 
     def test_diagnostics_no_rom(self):
         status, body = self.request('POST', '/api/compile', json.dumps({'source':'void setup(){noSuchCall();}\nvoid loop(){}'}), {'Content-Type':'application/json'})

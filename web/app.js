@@ -46,6 +46,32 @@
   function saveFile(name,content,mime){
     const url=URL.createObjectURL(new Blob([content],{type:mime}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
+  function selectedExport(){
+    if(!lastBuild)return null;
+    const selection=$('rom-format').value;
+    if(selection==='original')return {rom:lastBuild.rom,size:lastBuild.rom_bytes,suffix:''};
+    const item=lastBuild.exports?.find(item=>String(item.size)===selection);
+    return item?{...item,suffix:'-'+(item.size/1024)+'KiB'}:null;
+  }
+  function updateDownload(){
+    const item=selectedExport();
+    $('download').disabled=!item;
+    if(!item)return;
+    $('download-size').textContent=`${item.size.toLocaleString('it-IT')} byte · codice e dati: ${lastBuild.code_bytes.toLocaleString('it-IT')} byte`;
+    $('download').title='Scarica l’ultima ROM compilata: '+lastBuild.name+item.suffix+'.sg';
+  }
+  function exportChoices(){
+    const select=$('rom-format'), previous=select.value;
+    select.replaceChildren(new Option(`Originale (${lastBuild.rom_bytes/1024} KiB)`, 'original'));
+    const choices=lastBuild.exports||[];
+    for(const size of [8192,16384,32768,49152]){
+      const available=choices.some(item=>item.size===size);
+      const option=new Option(`${size/1024} KiB${available?'':' — non disponibile'}`,String(size));
+      option.disabled=!available;select.add(option);
+    }
+    select.value=choices.some(item=>String(item.size)===previous)?previous:'original';
+    select.disabled=false;updateDownload();
+  }
   async function compile(){
     if(busy)return;busy=true;errorLine=null;persist();
     const source=editor.value,name=current;
@@ -63,7 +89,7 @@
       $('rom-size').innerHTML=(result.rom_bytes/1024)+'<small>KiB</small>';
       $('code-size').innerHTML=result.code_bytes.toLocaleString('it-IT')+'<small>byte</small>';
       $('ram-size').innerHTML=result.ram_bytes+'<small>byte</small>';
-      $('download').disabled=false;$('download').title='Scarica l’ultima ROM compilata: '+name+'.sg';
+      exportChoices();
       $('status-text').textContent='Build riuscita · '+name+'.sg';
       try{
         await player.load(bytes(result.rom));
@@ -99,7 +125,8 @@
   $('example-select').addEventListener('change',()=>{if(busy){$('example-select').value=current;return;}choose($('example-select').value);});
   $('goto-error').addEventListener('click',()=>{if(!errorLine)return;const lines=editor.value.split('\n');const start=lines.slice(0,errorLine-1).reduce((sum,line)=>sum+line.length+1,0);editor.focus();editor.setSelectionRange(start,start+(lines[errorLine-1]||'').length);editor.scrollTop=Math.max(0,(errorLine-4)*22);syncScroll();updateCursor();});
   $('save-source').addEventListener('click',()=>saveFile(current+'.cvc',editor.value,'text/plain'));
-  $('download').addEventListener('click',()=>{if(lastBuild)saveFile(lastBuild.name+'.sg',bytes(lastBuild.rom),'application/octet-stream');});
+  $('rom-format').addEventListener('change',updateDownload);
+  $('download').addEventListener('click',()=>{const item=selectedExport();if(item)saveFile(lastBuild.name+item.suffix+'.sg',bytes(item.rom),'application/octet-stream');});
   $('pause').addEventListener('click',()=>{const paused=player.pause();$('pause-overlay').hidden=!paused;$('pause').innerHTML=paused?'▶ <span>Riprendi</span>':'Ⅱ <span>Pausa</span>';$('preview-state').textContent=paused?'IN PAUSA':'IN ESECUZIONE';$('preview-state').classList.toggle('live',!paused);});
   $('reset').addEventListener('click',()=>player.reset());
   $('sound').addEventListener('click',async()=>{try{const on=await player.sound();$('sound').innerHTML='♪ <span>Audio '+(on?'on':'off')+'</span>';}catch(error){outputs.diagnostics+='\nAudio: '+error.message;output('diagnostics');}});

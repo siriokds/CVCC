@@ -115,6 +115,16 @@ Use **Compila e avvia** or Command/Ctrl+Enter after editing. Source drafts are
 stored in the browser, not written over repository examples. The last successful
 ROM remains available after an error and is labeled accordingly.
 
+The download menu offers the original image and 8, 16, 32 or 48 KiB files.
+Only sizes that fit `ROM_END` (all generated code and ROM data) are enabled.
+Exporting never changes the ROM currently running in the player. The original
+is byte-for-byte unchanged; smaller exports remove only verified padding and
+CVBasic's optional Sega identification footer at 0x7FF0. The footer is retained
+when it fits, and larger images are extended with 0xFF. This is an SG-1000 size
+export, not a new mapper or a change to the compiler's current 32 KiB limit.
+Unknown layouts disable resizing rather than risk dropping meaningful bytes.
+`python3 tests/test_rom_exports.py` checks size boundaries and preservation.
+
 The browser sends source to a loopback-only Python service, which invokes the
 native compiler pipeline. The returned ROM runs in the separate WebAssembly
 player. **The compiler itself is not yet running in WebAssembly.** The editor,

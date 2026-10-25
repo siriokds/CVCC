@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from urllib.parse import urlsplit
+from rom_exports import exports
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_LOCK = threading.Lock()
@@ -90,7 +91,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(422, dict(error=message.strip(), line=int(match[1]) if match else None, column=int(match[2]) if match else None))
                 metadata = json.loads((out / 'build.json').read_text())
                 symbols = dict((name, int(address,16)) for name,address in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$', (out/'program.sym').read_text(), re.M))
-                return self.send(200, dict(rom=base64.b64encode((out/'program.sg').read_bytes()).decode(),
+                rom = (out/'program.sg').read_bytes()
+                code_bytes = symbols.get('ROM_END', 0)
+                return self.send(200, dict(rom=base64.b64encode(rom).decode(),
+                    exports=exports(rom, code_bytes),
                     basic=(out/'program.bas').read_text(), assembly=(out/'program.sj.asm').read_text(),
                     log=(out/'build.log').read_text(), elapsed_ms=round((time.perf_counter()-started)*1000),
                     rom_bytes=metadata['rom_bytes'], sha256=metadata['rom_sha256'],
