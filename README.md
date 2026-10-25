@@ -192,6 +192,17 @@ errors, request origin checks and the static file allowlist. Set
   `!`, including nesting and truth tests of nonzero integers. AND/OR conditions
   lower to branches with left-to-right short-circuit evaluation, not BASIC
   bitwise operators. Both sides are still checked for source errors.
+- `switch (expression) { case value: ... default: ... }`, with the selector
+  evaluated once. Case values are literals or scalar const names in 0..65535;
+  duplicate values/defaults are rejected. Up to 256 labels per switch are
+  supported, directly inside the braced switch body. The default may appear
+  anywhere; omitted breaks preserve source-order fall-through, including stacked
+  labels. `break` exits the nearest loop or switch; `continue` targets the nearest
+  enclosing loop, even through switches. `return;` exits the containing function.
+  The initial lowering uses comparisons and labels, with a shared two-byte
+  selector scratch value; it is not a jump-table optimizer. Switch declarations,
+  initializer clauses, arbitrary case constant expressions and statements before
+  the first label are not supported yet.
 - One-dimensional byte/word RAM arrays (`uint16_t values[N];`) and ROM arrays
   (`const uint16_t values[N] = {...};`), accessed with `values[index]`.
   Sizes are explicit positive literals. Optional RAM initializers and mandatory
@@ -231,7 +242,15 @@ the backend's width rules; they do not provide short-circuit boolean evaluation.
 
 The `logic.cvc` example adds constant shifts and nested short-circuit conditions.
 
+The `states.cvc` workbench example moves a sprite around a rectangle using a
+switch-driven state machine, with both fall-through and direct returns.
+
 ## Validation
+
+`switch.cvc` checks word selectors, stacked labels, missing/default-in-the-middle
+cases, fall-through, nested switches, mixed loop/switch break and continue, and
+returns from setup, loop and helper functions. Differential assembly and
+180-frame state checks pass on SG-1000 NTSC and SC-3000 PAL.
 
 `do_while.cvc` covers a false first condition, continue-to-test, break, nested
 and mixed for/while/do loops, early return and short-circuit guarded array reads.

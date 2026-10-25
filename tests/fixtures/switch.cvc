@@ -1,0 +1,72 @@
+const uint16_t WORD_STATE = 300;
+uint16_t state = 300;
+uint8_t fall;
+uint8_t defaultFirst;
+uint8_t skipped;
+uint8_t hits;
+uint8_t i;
+uint8_t j;
+uint8_t afterSwitch;
+uint8_t nested;
+uint8_t returned;
+uint8_t doCount;
+uint8_t whileCount;
+uint8_t ticks;
+uint8_t stacked;
+
+void setup() {
+    switch (state) {
+        case WORD_STATE: fall++; state = 0;
+        case 0: fall += 2; break;
+        default: skipped++;
+    }
+    switch (99) {
+        case 1: skipped++; break;
+        default: defaultFirst++;
+        case 2: defaultFirst += 2; break;
+    }
+    switch (7) { case 1: skipped++; }
+    switch (0) {}
+    switch (1) { case 0: case 1: stacked = 1; break; }
+    for (i = 0; i < 4; i++) {
+        switch (i) {
+            case 0: continue;
+            case 1: hits++; break;
+            case 2:
+                for (j = 0; j < 3; j++) {
+                    if (j == 1) { continue; }
+                    nested++;
+                    break;
+                }
+                switch (state) { case 0: nested += 2; break; default: skipped++; }
+                hits += 2;
+                break;
+            default: break;
+        }
+        afterSwitch++;
+    }
+    i = 0;
+    do {
+        i++;
+        switch (i) { case 1: continue; default: break; }
+        doCount++;
+    } while (i < 2);
+    i = 0;
+    while (i < 2) {
+        i++;
+        switch (i) { case 1: continue; default: break; }
+        whileCount++;
+    }
+    finish();
+    switch (returned) { case 1: return; default: skipped++; }
+    skipped = 99;
+}
+void finish() {
+    switch (300) { default: skipped++; break; case 300: returned = 1; return; }
+    returned = 99;
+}
+void loop() {
+    waitVBlank();
+    switch (0) { case 0: ticks++; return; default: skipped++; }
+    skipped = 98;
+}

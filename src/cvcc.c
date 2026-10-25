@@ -22,8 +22,8 @@ typedef struct {
     Function functions[128];
     unsigned function_count;
     unsigned char calls[128][128], visited[128];
-    unsigned loop_ids[64], loop_depth, next_loop, next_bool;
-    int current_function, wait_counter_declared, failed;
+    unsigned loop_ids[64], loop_depth, break_ids[64], break_depth, next_loop, next_bool;
+    int current_function, wait_counter_declared, switch_value_declared, failed;
 } Compiler;
 
 static int kind(TSNode n, const char *s) { return !ts_node_is_null(n) && !strcmp(ts_node_type(n), s); }
@@ -362,10 +362,55 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
             if(!ts_node_is_null(alt)) { fputs("ELSE\n",c->out); statement(c,child(alt,0),depth+1); }
             fputs("END IF\n",c->out);
         }
+    } else if(kind(n,"switch_statement")) {
+        TSNode cond=field(n,"condition"), body=field(n,"body");
+        if(children(cond)!=1 || !kind(body,"compound_statement")) { error(c,n,"switch requires an expression and a braced body"); return; }
+        unsigned count=children(body), values[256];
+        int fallback=-1;
+        if(count>256 || c->break_depth==64) { error(c,n,"switch exceeds case or nesting limit"); return; }
+        for(unsigned i=0;i<count;i++) {
+            TSNode item=child(body,i), value=field(item,"value");
+            if(!kind(item,"case_statement")) { error(c,item,"switch body must contain case/default labels"); return; }
+            if(ts_node_is_null(value)) {
+                if(fallback>=0) { error(c,item,"duplicate default label"); return; }
+                fallback=(int)i; continue;
+            }
+            while(kind(value,"parenthesized_expression")) value=child(value,0);
+            TSNode literal=value;
+            if(kind(value,"identifier")) {
+                Symbol *symbol=lookup(c,value); if(!symbol) return;
+                if(!symbol->constant || symbol->array) { error(c,value,"case requires a literal or scalar const"); return; }
+                literal=symbol->value;
+            }
+            if(!number(c,literal,65535,&values[i])) return;
+            for(unsigned j=0;j<i;j++) if((int)j!=fallback && values[j]==values[i]) { error(c,value,"duplicate case value %u",values[i]); return; }
+        }
+        unsigned id=c->next_loop++;
+        // Dispatch is completed before any case body runs, so nested switches
+        // may safely reuse this scratch value without affecting fall-through.
+        if(!c->switch_value_declared) { fputs("DIM #cvcc_switch_value\n",c->out); c->switch_value_declared=1; }
+        fputs("#cvcc_switch_value = ",c->out); expression(c,field(cond,"value")); fputc('\n',c->out);
+        for(unsigned i=0;i<count;i++) if((int)i!=fallback)
+            fprintf(c->out,"IF #cvcc_switch_value = %u THEN GOTO cvcc_case%u_%u\n",values[i],id,i);
+        if(fallback>=0) fprintf(c->out,"GOTO cvcc_case%u_%u\n",id,(unsigned)fallback);
+        else fprintf(c->out,"GOTO cvcc_break%u\n",id);
+        c->break_ids[c->break_depth++]=id;
+        for(unsigned i=0;i<count;i++) {
+            TSNode item=child(body,i), value=field(item,"value");
+            fprintf(c->out,"cvcc_case%u_%u:\n",id,i);
+            for(unsigned j=0;j<children(item);j++) {
+                TSNode action=child(item,j);
+                if(!ts_node_is_null(value) && ts_node_eq(action,value)) continue;
+                statement(c,action,depth+1);
+            }
+        }
+        fprintf(c->out,"cvcc_break%u:\n",id);
+        c->break_depth--;
     } else if(kind(n,"do_statement")) {
-        if(c->loop_depth==64) { error(c,n,"loop nesting exceeds 64"); return; }
+        if(c->loop_depth==64 || c->break_depth==64) { error(c,n,"loop nesting exceeds 64"); return; }
         unsigned id=c->next_loop++;
         c->loop_ids[c->loop_depth++]=id;
+        c->break_ids[c->break_depth++]=id;
         fprintf(c->out,"cvcc_do%u:\n",id);
         statement(c,field(n,"body"),depth+1);
         // A do-loop continue tests the condition; it must not restart the body.
@@ -380,10 +425,10 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
             fprintf(c->out," THEN GOTO cvcc_do%u\n",id);
         }
         fprintf(c->out,"cvcc_break%u:\n",id);
-        c->loop_depth--;
+        c->loop_depth--; c->break_depth--;
     } else if(kind(n,"while_statement") || kind(n,"for_statement")) {
         int counted=kind(n,"for_statement");
-        if(c->loop_depth==64) { error(c,n,"loop nesting exceeds 64"); return; }
+        if(c->loop_depth==64 || c->break_depth==64) { error(c,n,"loop nesting exceeds 64"); return; }
         unsigned id=c->next_loop++;
         if(counted) {
             TSNode init=field(n,"initializer");
@@ -392,6 +437,7 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
             effect(c,init);
         }
         c->loop_ids[c->loop_depth++]=id;
+        c->break_ids[c->break_depth++]=id;
         TSNode cond=field(n,"condition");
         if(logical(c,cond)) {
             unsigned yes=c->next_bool++, no=c->next_bool++;
@@ -406,10 +452,15 @@ static void statement(Compiler *c,TSNode n,unsigned depth) {
         fprintf(c->out,"cvcc_continue%u:\n",id);
         if(counted) effect(c,field(n,"update"));
         fprintf(c->out,"WEND\ncvcc_break%u:\n",id);
-        c->loop_depth--;
+        c->loop_depth--; c->break_depth--;
     } else if(kind(n,"break_statement") || kind(n,"continue_statement")) {
-        if(!c->loop_depth) { error(c,n,"break/continue require an enclosing loop"); return; }
-        fprintf(c->out,"GOTO cvcc_%s%u\n",kind(n,"break_statement")?"break":"continue",c->loop_ids[c->loop_depth-1]);
+        if(kind(n,"break_statement")) {
+            if(!c->break_depth) { error(c,n,"break requires an enclosing loop or switch"); return; }
+            fprintf(c->out,"GOTO cvcc_break%u\n",c->break_ids[c->break_depth-1]);
+        } else {
+            if(!c->loop_depth) { error(c,n,"continue requires an enclosing loop"); return; }
+            fprintf(c->out,"GOTO cvcc_continue%u\n",c->loop_ids[c->loop_depth-1]);
+        }
     } else if(kind(n,"return_statement")) {
         if(children(n)) { error(c,n,"void functions cannot return a value"); return; }
         fputs(c->current_function<0?"GOTO cvcc_main_loop\n":"RETURN\n",c->out);

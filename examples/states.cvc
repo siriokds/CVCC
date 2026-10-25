@@ -1,0 +1,44 @@
+// A 16x16 outline square. Sprite bytes: left half, then right half.
+const uint8_t square[32] = {
+    255,128,128,128,128,128,128,128,128,128,128,128,128,128,128,255,
+    255,1,1,1,1,1,1,1,1,1,1,1,1,1,1,255
+};
+uint8_t x;
+uint8_t y;
+uint8_t state;
+
+void setup() {
+    defineSprite(0, 1, square);
+    printAt(35, "Switch / state machine");
+}
+void loop() {
+    waitVBlank();
+    updateState();
+    sprite(0, y, x, 0, 10);
+}
+void updateState() {
+    switch (state) {
+        case 0:
+            x = 16; y = 64; state = 1;
+            // Fall through: take the first step immediately.
+        case 1:
+            x++;
+            if (x == 224) { state = 2; }
+            return;
+        case 2:
+            y++;
+            if (y == 160) { state = 3; }
+            break;
+        case 3:
+            x--;
+            if (x == 16) { state = 4; }
+            break;
+        case 4:
+            y--;
+            if (y == 64) { state = 1; }
+            break;
+        default:
+            state = 0;
+            return;
+    }
+}

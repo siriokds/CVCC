@@ -122,6 +122,19 @@ class FrontendTests(unittest.TestCase):
             'do_bad_body': 'void setup(){do {uint8_t local;} while(0);} void loop(){}',
             'do_break_scope': 'void setup(){do {} while(0); break;} void loop(){}',
             'do_continue_scope': 'void setup(){do {} while(0); continue;} void loop(){}',
+            'switch_duplicate': 'void setup(){switch(1){case 1:break;case 0x1:break;}} void loop(){}',
+            'switch_const_duplicate': 'const uint8_t A=1; void setup(){switch(1){case A:break;case 1:break;}} void loop(){}',
+            'switch_default_duplicate': 'void setup(){switch(1){default:break;default:break;}} void loop(){}',
+            'switch_variable_case': 'uint8_t n; void setup(){switch(1){case n:break;}} void loop(){}',
+            'switch_case_range': 'void setup(){switch(1){case 65536:break;}} void loop(){}',
+            'switch_case_negative': 'void setup(){switch(1){case -1:break;}} void loop(){}',
+            'switch_continue': 'void setup(){switch(1){case 1:continue;}} void loop(){}',
+            'switch_break_scope': 'void setup(){switch(1){default:break;} break;} void loop(){}',
+            'switch_init': 'uint8_t n; void setup(){switch(n=1;n){default:break;}} void loop(){}',
+            'switch_declaration': 'void setup(){switch(uint8_t n=1){default:break;}} void loop(){}',
+            'switch_prelude': 'void setup(){switch(1){waitFrame();case 1:break;}} void loop(){}',
+            'case_outside': 'void setup(){case 1:break;} void loop(){}',
+            'switch_bad_selector': 'void setup(){switch(missing){default:break;}} void loop(){}',
             'for_local': 'void setup(){for(uint8_t i=0;i<3;i++){}} void loop(){}',
             'for_comma': 'uint8_t i; uint8_t j; void setup(){for(i=0,j=0;i<3;i++){}} void loop(){}',
             'break_outside': 'void setup(){break;} void loop(){}',
@@ -198,6 +211,15 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('cvcc_continue1:\nIF v1 < 3 THEN GOTO cvcc_do1',result.stdout)
         self.assertIn('GOTO cvcc_break2',result.stdout)
 
+    def test_switch_dispatch_and_fallthrough(self):
+        result=self.compile((ROOT/'tests/fixtures/switch.cvc').read_text())
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.count('DIM #cvcc_switch_value'),1)
+        self.assertIn('#cvcc_switch_value = #v1',result.stdout)
+        self.assertIn('IF #cvcc_switch_value = 300 THEN GOTO cvcc_case0_0',result.stdout)
+        self.assertIn('v2 = v2 + 1\n#v1 = 0\ncvcc_case0_1:',result.stdout)
+        self.assertIn('GOTO cvcc_continue5',result.stdout)
+
     def test_adapter_rejects_other_targets_and_banking(self):
         for source in ['SG1000: equ 0\nCVBASIC_BANK_SWITCHING: equ 0', 'SG1000: equ 1\nCVBASIC_BANK_SWITCHING: equ 1']:
             with self.assertRaises(ValueError):
@@ -261,6 +283,14 @@ class RomTests(unittest.TestCase):
     def test_do_while_rom(self):
         dest=BUILD/'do-while'
         command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'tests/fixtures/do_while.cvc','--out-dir',dest)
+        cvb=ROOT/'.work/deps/CVBasic'
+        command(BUILD/'reference-cvbasic','--sg1000',dest/'program.bas',dest/'reference.asm',str(cvb)+'/')
+        command('gasm80',dest/'reference.asm','-o',dest/'reference.sg')
+        self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
+
+    def test_switch_rom(self):
+        dest=BUILD/'switch'
+        command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'tests/fixtures/switch.cvc','--out-dir',dest)
         cvb=ROOT/'.work/deps/CVBasic'
         command(BUILD/'reference-cvbasic','--sg1000',dest/'program.bas',dest/'reference.asm',str(cvb)+'/')
         command('gasm80',dest/'reference.asm','-o',dest/'reference.sg')
