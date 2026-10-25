@@ -177,6 +177,23 @@ textual and repeated declarations are errors. Nested includes are supported;
 cycles and missing files produce diagnostics. This is not a macro preprocessor:
 angle-bracket includes, `#define` and conditional directives are not supported.
 
+Use `#incbin "sprite.bin"` on its own line inside an array initializer:
+
+```c
+const uint8_t spriteData[32] = {
+#incbin "sprite.bin"
+};
+```
+
+CVCC inserts the binary's byte values in order (including zero bytes), with a
+trailing comma, before parsing. Declare the exact array size. Paths resolve
+relative to the containing source/header and stay within the project, including
+symlinks. Supported binary extensions: `.bin`, `.chr`, `.pal`, `.map`, `.dat`;
+each inclusion accepts 1..8192 bytes. No offset/length syntax yet.
+The workbench displays binaries as read-only hex previews; file and project ZIP
+downloads preserve the original bytes. `examples/functions` demonstrates this
+with its own square sprite. Binary files count toward the 1 MiB project limit.
+
 Build a folder with `python3 tools/build_rom.py examples/functions --out-dir build/functions`.
 The build driver expands includes before Tree-sitter parsing and maps errors
 back to the original file and line. The raw `build/cvcc` executable still accepts

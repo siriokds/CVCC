@@ -72,6 +72,21 @@ class WebTests(unittest.TestCase):
         files['../escape.h']=''
         self.assertEqual(self.request('POST','/api/project-download',json.dumps({'files':files}),{'Content-Type':'application/json'})[0],400)
 
+    def test_binary_compile_and_zip(self):
+        import sys
+        sys.path.insert(0,str(ROOT/'tools'))
+        from project_source import read_project
+        files=read_project(ROOT/'examples/functions')
+        status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,200,body)
+        self.assertEqual(json.loads(body)['sha256'],'e7b06409ffb08868eedf06673259492c844353bdf38a164e6cfdbf72876ccb4d')
+        status,body=self.request('POST','/api/project-download',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,200,body)
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            self.assertEqual(archive.read('square.bin'),(ROOT/'examples/functions/square.bin').read_bytes())
+        files['square.bin']={'base64':'%%%'}
+        self.assertEqual(self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})[0],400)
+
     def test_no_arbitrary_files_or_cross_origin(self):
         self.assertEqual(self.request('GET', '/../../.git/config')[0],404)
         self.assertEqual(self.request('GET', '/api/config',headers={'Origin':'https://example.invalid'})[0],403)

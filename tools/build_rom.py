@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from gasm80_to_sjasmplus import adapt
-from project_source import expand, remap
+from project_source import expand, remap, file_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -66,7 +66,7 @@ def main():
         if not rom or len(rom) > 32768:
             raise RuntimeError('prototype requires a nonempty ROM of at most 32 KiB')
         metadata = dict(source=str(source), source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
-                        project_files={name:hashlib.sha256(text.encode()).hexdigest() for name,text in inputs.items()},
+                        project_files={name:hashlib.sha256(file_bytes(text)).hexdigest() for name,text in inputs.items()},
                         frontend_sha256=hashlib.sha256(args.frontend.resolve().read_bytes()).hexdigest(),
                         dependencies=lock, assembler=run([assembler, '--version']).stdout.strip(),
                         assembler_sha256=hashlib.sha256(Path(assembler).read_bytes()).hexdigest(),

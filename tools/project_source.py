@@ -1,8 +1,19 @@
 """Bounded project-local quoted includes; deliberately not a C macro preprocessor."""
 from pathlib import Path, PurePosixPath
 import re
+import base64
+import binascii
 
 LIMIT = 1024 * 1024
+BINARY_SUFFIXES = ('.bin', '.chr', '.pal', '.map', '.dat')
+
+def file_bytes(value):
+    if isinstance(value, str): return value.encode()
+    if not isinstance(value, dict) or set(value) != {'base64'} or not isinstance(value['base64'], str):
+        raise ValueError('Expected binary file encoded as {"base64": "..."}')
+    try: return base64.b64decode(value['base64'], validate=True)
+    except (ValueError, binascii.Error) as exc: raise ValueError('Invalid binary base64') from exc
+
 
 def validate_files(files):
     if not isinstance(files, dict) or not files or len(files) > 128:
@@ -14,11 +25,13 @@ def validate_files(files):
         if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_. /-]+', name) or '\\' in name:
             raise ValueError('Invalid project filename')
         path = PurePosixPath(name)
-        if path.is_absolute() or any(p in ('', '.', '..') for p in name.split('/')) or path.suffix not in ('.cvc', '.h'):
-            raise ValueError('Project files must be relative .cvc/.h paths without traversal')
-        if not isinstance(source, str) or '\0' in source:
+        if path.is_absolute() or any(p in ('', '.', '..') for p in name.split('/')) or path.suffix not in ('.cvc', '.h') + BINARY_SUFFIXES:
+            raise ValueError('Project files must be relative source or binary paths without traversal')
+        if path.suffix in BINARY_SUFFIXES:
+            if isinstance(source, str): raise ValueError('Binary files require base64 encoding')
+        elif not isinstance(source, str) or '\0' in source:
             raise ValueError('Expected source text without NUL bytes')
-        total += len(source.encode())
+        total += len(file_bytes(source))
     if total > LIMIT:
         raise ValueError('Project exceeds 1 MiB')
     names={name.casefold() for name in files}
@@ -33,13 +46,13 @@ def read_project(directory):
         raise ValueError('Project requires main.cvc')
     files = {}
     for path in sorted(root.rglob('*')):
-        if path.suffix in ('.cvc', '.h') and path.is_file():
+        if path.suffix in ('.cvc', '.h') + BINARY_SUFFIXES and path.is_file():
             if not path.resolve().is_relative_to(root):
                 raise ValueError('Project symlink escapes project directory')
             if path.stat().st_size > LIMIT:
                 raise ValueError('Project file exceeds 1 MiB')
-            files[path.relative_to(root).as_posix()] = path.read_text()
-            if sum(len(value.encode()) for value in files.values())>LIMIT: raise ValueError('Project exceeds 1 MiB')
+            files[path.relative_to(root).as_posix()] = {'base64': base64.b64encode(path.read_bytes()).decode()} if path.suffix in BINARY_SUFFIXES else path.read_text()
+            if sum(len(file_bytes(value)) for value in files.values())>LIMIT: raise ValueError('Project exceeds 1 MiB')
             if len(files)>128: raise ValueError('Too many project files')
     return validate_files(files)
 
@@ -88,11 +101,25 @@ def expand(entry):
             if directive.startswith('#'):
                 if directive=='#pragma once': once.add(path)
                 else:
-                    match=re.fullmatch(r'#\s*include\s*"([^"\n]+)"',directive)
-                    if not match: raise ValueError(f'{path}:{line_no}:1: error: only quoted #include and #pragma once are supported')
-                    name=match[1]
+                    match=re.fullmatch(r'#\s*(include|incbin)\s*"([^"\n]+)"',directive)
+                    if not match: raise ValueError(f'{path}:{line_no}:1: error: only quoted #include, #incbin and #pragma once are supported')
+                    name=match[2]
                     if Path(name).is_absolute() or '\\' in name: raise ValueError(f'{path}:{line_no}:1: error: include must be project-relative')
-                    try: visit(path.parent/name)
+                    try:
+                        if match[1]=='include': visit(path.parent/name)
+                        else:
+                            binary=(path.parent/name).resolve()
+                            if not binary.is_relative_to(root): raise ValueError('Binary escapes project directory')
+                            if binary.suffix not in BINARY_SUFFIXES: raise ValueError('Unsupported binary extension')
+                            if not 1 <= binary.stat().st_size <= 8192: raise ValueError('Binary must contain 1..8192 bytes')
+                            data=binary.read_bytes()
+                            inputs[binary.relative_to(root).as_posix()]={'base64':base64.b64encode(data).decode()}
+                            if len(inputs)>128: raise ValueError('Too many included files')
+                            for offset in range(0,len(data),16):
+                                text=','.join(str(b) for b in data[offset:offset+16])+',\n'
+                                total+=len(text.encode())
+                                if total>LIMIT: raise ValueError('Expanded source exceeds 1 MiB')
+                                output.append(text);mapping.append((str(path),line_no))
                     except (OSError,ValueError) as exc: raise ValueError(f'{path}:{line_no}:1: error: {exc}') from exc
                 # Directives occupy one mapped blank line after included text.
                 blank=re.sub(r'[^\n]', ' ', line)

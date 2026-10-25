@@ -15,13 +15,13 @@
     }
     return result+escape(source.slice(cursor))+'\n';
   }
-  function persist(){if(!Object.keys(projectFiles).length)return;projectFiles[currentFile]=editor.value;try{localStorage.setItem('cvcc-project-'+current,JSON.stringify(projectFiles));}catch{}}
+  function persist(){if(!Object.keys(projectFiles).length)return;if(typeof projectFiles[currentFile]==='string')projectFiles[currentFile]=editor.value;try{localStorage.setItem('cvcc-project-'+current,JSON.stringify(projectFiles));}catch{}}
   function projectText(){return JSON.stringify(projectFiles);}
   function updateEditor(){
     $('highlight').innerHTML=highlight(editor.value);
     const lines=editor.value.split('\n').length;
     $('line-numbers').textContent=Array.from({length:lines},(_,i)=>i+1).join('\n');
-    $('source-lines').textContent=lines+' righe';
+    $('source-lines').textContent=editor.readOnly?bytes(projectFiles[currentFile].base64).length+' byte · sola lettura':lines+' righe';
     const dirty=!!lastBuild&&(current!==lastBuild.name||projectText()!==lastSource);
     $('dirty-mark').hidden=!dirty;
     if(dirty)$('preview-note').textContent='Modifiche da compilare. Il player mostra l’ultima ROM valida.';
@@ -40,8 +40,18 @@
       }
     }
   }
+  function showFile(){
+    const value=projectFiles[currentFile];editor.readOnly=typeof value!=='string';
+    if(!editor.readOnly){editor.value=value;return;}
+    const data=bytes(value.base64),rows=[];
+    for(let offset=0;offset<data.length;offset+=16){
+      const part=data.slice(offset,offset+16);
+      rows.push(offset.toString(16).padStart(6,'0')+'  '+Array.from(part,b=>b.toString(16).padStart(2,'0')).join(' ').padEnd(47)+'  '+Array.from(part,b=>b>=32&&b<127?String.fromCharCode(b):'.').join(''));
+    }
+    editor.value=rows.join('\n');
+  }
   function chooseFile(name){
-    if(busy)return;persist();currentFile=name;editor.value=projectFiles[name];
+    if(busy)return;persist();currentFile=name;showFile();
     $('current-name').textContent=current+'/'+name;$('file-select').value=name;
     editor.scrollTop=0;editor.scrollLeft=0;updateEditor();renderTree();
   }
@@ -49,10 +59,10 @@
     if(busy)return;persist();current=id;const project=examples.find(e=>e.id===id);
     projectFiles={...project.files};
     try{const draft=JSON.parse(localStorage.getItem('cvcc-project-'+id)||'null');
-      if(draft){for(const name of Object.keys(projectFiles))if(typeof draft[name]==='string')projectFiles[name]=draft[name];}
+      if(draft){for(const name of Object.keys(projectFiles))if(typeof projectFiles[name]==='string'&&typeof draft[name]==='string')projectFiles[name]=draft[name];}
       if(!draft&&Object.keys(projectFiles).length===1){const legacy=localStorage.getItem('cvcc-draft-'+id);if(legacy!==null)projectFiles['main.cvc']=legacy;}
     }catch{}
-    currentFile='main.cvc';editor.value=projectFiles[currentFile];
+    currentFile='main.cvc';showFile();
     $('example-select').value=id;$('file-select').replaceChildren(...Object.keys(projectFiles).map(name=>new Option(name,name)));
     $('current-name').textContent=id+'/main.cvc';$('file-select').value=currentFile;
     editor.scrollTop=0;editor.scrollLeft=0;updateEditor();renderTree();
@@ -134,7 +144,7 @@
   editor.addEventListener('input',()=>{persist();updateEditor();});
   editor.addEventListener('scroll',syncScroll);editor.addEventListener('click',updateCursor);editor.addEventListener('keyup',updateCursor);
   editor.addEventListener('keydown',event=>{
-    if(event.key==='Tab'){
+    if(event.key==='Tab'&&!editor.readOnly){
       event.preventDefault();const start=editor.selectionStart,end=editor.selectionEnd;
       editor.setRangeText('    ',start,end,'end');persist();updateEditor();
     }
@@ -145,7 +155,7 @@
   $('compile').addEventListener('click',compile);
   $('example-select').addEventListener('change',()=>{if(busy){$('example-select').value=current;return;}choose($('example-select').value);});
   $('goto-error').addEventListener('click',()=>{if(!errorLine)return;if(errorFile&&Object.hasOwn(projectFiles,errorFile))chooseFile(errorFile);const lines=editor.value.split('\n');const start=lines.slice(0,errorLine-1).reduce((sum,line)=>sum+line.length+1,0);editor.focus();editor.setSelectionRange(start,start+(lines[errorLine-1]||'').length);editor.scrollTop=Math.max(0,(errorLine-4)*22);syncScroll();updateCursor();});
-  $('save-source').addEventListener('click',()=>saveFile(currentFile.split('/').at(-1),editor.value,'text/plain'));
+  $('save-source').addEventListener('click',()=>saveFile(currentFile.split('/').at(-1),editor.readOnly?bytes(projectFiles[currentFile].base64):editor.value,editor.readOnly?'application/octet-stream':'text/plain'));
   $('save-project').addEventListener('click',async()=>{
     persist();const name=current;
     try{const response=await fetch('/api/project-download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:projectFiles})});

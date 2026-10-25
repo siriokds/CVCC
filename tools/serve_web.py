@@ -15,7 +15,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 from rom_exports import exports
-from project_source import read_project, validate_files
+from project_source import read_project, validate_files, file_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_LOCK = threading.Lock()
@@ -89,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == '/api/project-download':
             archive=io.BytesIO()
             with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
-                for name,source in files.items(): z.writestr(name,source)
+                for name,source in files.items(): z.writestr(name,file_bytes(source))
             return self.send(200,archive.getvalue(),'application/zip')
         if not BUILD_LOCK.acquire(blocking=False):
             return self.send(409, {'error': 'Another build is running'})
@@ -99,7 +99,7 @@ class Handler(BaseHTTPRequestHandler):
                 work = Path(tmp)
                 project=work/'project';project.mkdir()
                 for name,source in files.items():
-                    file=project/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text(source)
+                    file=project/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_bytes(file_bytes(source))
                 path = project / 'main.cvc'
                 out = work / 'result'
                 result = subprocess.run([sys.executable, str(ROOT / 'tools/build_rom.py'), str(path), '--out-dir', str(out)], cwd=ROOT, capture_output=True, text=True, timeout=30)
