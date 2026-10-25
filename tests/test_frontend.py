@@ -228,6 +228,27 @@ class FrontendTests(unittest.TestCase):
         self.assertIn('v2 = v2 + 1\n#v1 = 0\ncvcc_case0_1:',result.stdout)
         self.assertIn('GOTO cvcc_continue5',result.stdout)
 
+    def test_video_vram(self):
+        result=self.compile((ROOT/'tests/fixtures/video_vram.cvc').read_text())
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('DEFINE VRAM 12288,4,VARPTR d0(2)',result.stdout)
+        self.assertIn('DEFINE VRAM READ 12288,4,VARPTR v1(3)',result.stdout)
+        self.assertIn('SCREEN ENABLE\nVDP(1) = 224',result.stdout)
+
+    def test_video_rejections(self):
+        for call in ['videoMode(3)', 'videoMode(x)', 'screenEnable(1)',
+                     'spriteFlicker(2)', 'vdpWrite(8,0)', 'vdpWrite(x,0)',
+                     'vramPoke(16384,0)', 'vramPoke(0,256)',
+                     'vramWrite(0,data,0,0)', 'vramWrite(0,data,1,2)',
+                     'vramWrite(16383,data,0,2)', 'vramWrite(0,data,x,1)',
+                     'vramRead(0,data,0,1)', 'vramWrite(0,words,0,1)',
+                     'vramWrite(0,x,0,1)', 'vramWrite(0,data,0)']:
+            with self.subTest(call=call):
+                result=self.compile('const uint8_t data[2]={1,2}; uint16_t words[2]; uint8_t x; void setup(){'+call+';} void loop(){}')
+                self.assertNotEqual(result.returncode,0)
+                self.assertIn('error:',result.stderr)
+                self.assertEqual(result.stdout,'')
+
     def test_parameters_and_return_values(self):
         result=self.compile((ROOT/'tests/fixtures/function_values.cvc').read_text())
         self.assertEqual(result.returncode,0,result.stderr)
@@ -314,6 +335,12 @@ class RomTests(unittest.TestCase):
         cvb=ROOT/'.work/deps/CVBasic'
         command(BUILD/'reference-cvbasic','--sg1000',dest/'program.bas',dest/'reference.asm',str(cvb)+'/')
         command('gasm80',dest/'reference.asm','-o',dest/'reference.sg')
+        self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
+
+    def test_video_vram_rom(self):
+        dest=BUILD/'video-vram'
+        command(sys.executable,ROOT/'tools/build_rom.py',ROOT/'tests/fixtures/video_vram.cvc','--out-dir',dest)
+        command('gasm80',dest/'program.gasm.asm','-o',dest/'reference.sg')
         self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
 
     def test_function_values_rom(self):

@@ -104,7 +104,7 @@ static void declare(Compiler *c,TSNode n) {
     if (kind(decl,"init_declarator")) { val=field(decl,"value"); decl=field(decl,"declarator"); }
     int array=kind(decl,"array_declarator"); TSNode name_node=array?field(decl,"declarator"):decl;
     char name[64]; if (!identifier(c,name_node,name)) return;
-    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite"};
+    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(name,reserved[i])) {
         error(c,n,"reserved entry point or builtin name"); return;
     }
@@ -141,7 +141,7 @@ static void function(Compiler *c,TSNode n) {
         *slot=body; return;
     }
     char id[64]; if (!identifier(c,name,id)) return;
-    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite"};
+    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(id,reserved[i])) { error(c,name,"reserved builtin name"); return; }
     for(unsigned i=0;i<c->function_count;i++) if(!strcmp(id,c->functions[i].name)) { error(c,name,"duplicate function"); return; }
     if(c->function_count==128) { error(c,name,"too many functions (maximum 128)"); return; }
@@ -352,7 +352,44 @@ static void literal_string(Compiler *c,TSNode n) {
 }
 static void builtin(Compiler *c,TSNode n) {
     TSNode fn=field(n,"function"), args=field(n,"arguments"); unsigned count=children(args);
-    if (equals(c,fn,"waitVBlank") || equals(c,fn,"waitFrame")) {
+    if(equals(c,fn,"videoMode") || equals(c,fn,"spriteFlicker")) {
+        unsigned value;
+        if(count!=1) { error(c,args,"expected one literal argument"); return; }
+        int mode=equals(c,fn,"videoMode");
+        if(!number(c,child(args,0),mode?2:1,&value)) return;
+        if(mode) fprintf(c->out,"MODE %u\n",value);
+        else fprintf(c->out,"SPRITE FLICKER %s\n",value?"ON":"OFF");
+    } else if(equals(c,fn,"screenEnable") || equals(c,fn,"screenDisable")) {
+        if(count) { error(c,args,"expected no arguments"); return; }
+        fprintf(c->out,"SCREEN %s\n",equals(c,fn,"screenEnable")?"ENABLE":"DISABLE");
+    } else if(equals(c,fn,"vdpWrite") || equals(c,fn,"vramPoke")) {
+        if(count!=2) { error(c,args,"expected address/register and byte value"); return; }
+        int reg=equals(c,fn,"vdpWrite"); unsigned address=0, value;
+        if(reg || kind(child(args,0),"number_literal"))
+            if(!number(c,child(args,0),reg?7:16383,&address)) return;
+        if(kind(child(args,1),"number_literal") && !number(c,child(args,1),255,&value)) return;
+        if(has_call(args)) { snapshot(c,child(args,0)); snapshot(c,child(args,1)); }
+        if(reg) fprintf(c->out,"VDP(%u) = ",address);
+        else { fputs("VPOKE ",c->out); expression(c,child(args,0)); fputc(',',c->out); }
+        expression(c,child(args,1)); fputc('\n',c->out);
+    } else if(equals(c,fn,"vramWrite") || equals(c,fn,"vramRead")) {
+        if(count!=4) { error(c,args,"expected VRAM address, byte array, literal offset and length"); return; }
+        int reading=equals(c,fn,"vramRead");
+        Symbol *s=lookup(c,child(args,1)); if(!s) return;
+        if(!s->array || s->word || (reading && s->constant)) { error(c,child(args,1),"VRAM transfer requires a byte array; reads require writable RAM"); return; }
+        unsigned offset,length,address;
+        if(!number(c,child(args,2),8192,&offset) || !number(c,child(args,3),8192,&length)) return;
+        if(!length || offset+length>(unsigned)s->size) { error(c,args,"VRAM transfer must have nonzero length and fit the array"); return; }
+        if(kind(child(args,0),"number_literal")) {
+            if(!number(c,child(args,0),16383,&address)) return;
+            if(address+length>16384) { error(c,args,"VRAM transfer exceeds 16 KiB"); return; }
+        }
+        prepare(c,child(args,0));
+        fputs(reading?"DEFINE VRAM READ ":"DEFINE VRAM ",c->out);
+        expression(c,child(args,0)); fprintf(c->out,",%u,VARPTR ",length);
+        symbol_name(c,s);
+        fprintf(c->out,"(%u)\n",offset);
+    } else if (equals(c,fn,"waitVBlank") || equals(c,fn,"waitFrame")) {
         if(count>1 || (equals(c,fn,"waitFrame") && count)) { error(c,args,"waitVBlank expects zero or one argument; waitFrame expects none"); return; }
         if(!count) { fputs("WAIT\n",c->out); return; }
         TSNode amount=child(args,0);

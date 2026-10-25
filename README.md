@@ -227,6 +227,22 @@ errors, request origin checks and the static file allowlist. Set
   The current SG-1000 backend emits CVBasic WAIT (HALT with VBlank interrupts
   enabled); waits belong in normal program flow, not interrupt handlers.
   Waiting follows machine VBlank timing, not a fixed millisecond duration.
+- `videoMode(0|1|2)` selects a CVBasic video mode (2 is Graphics I).
+  `screenDisable()` / `screenEnable()` blank or enable display;
+  `spriteFlicker(0|1)` disables/enables runtime sprite cycling.
+  `vdpWrite(register, value)` writes a literal register 0..7, and
+  `vramPoke(address, value)` writes one byte to VRAM.
+  Mode/flicker selectors are literals. Register 1 controls sprite size:
+  for the Air-Sea 8x8 configuration, use `vdpWrite(1, 0xE0)` **after**
+  `screenEnable()`, which restores the backend's 16x16 setting.
+- `vramWrite(address, array, offset, length)` copies byte ROM or RAM arrays
+  to VRAM; `vramRead(address, array, offset, length)` copies VRAM into a
+  writable RAM byte array. Offset and length are literals, length is nonzero,
+  and the span must fit the array. Literal VRAM addresses/spans are checked
+  against 16 KiB; computed addresses are the caller's responsibility.
+  These lower to CVBasic's interrupt-protected bulk transfers. Large uploads
+  belong in screen-disabled setup; frame-time transfers still need a timing budget.
+  Numeric arguments can call helpers; their values are preserved in source order.
 - `clearScreen()`, `printAt(position, "ASCII text")`,
   `defineSprite(first, count, data)`, `sprite(index, y, x, pattern, color)`.
   Sprite API ordering follows CVBasic. Patterns are 16x16, 32 bytes each.
@@ -262,6 +278,14 @@ directions using `advance(value, period)`, `triangle(value, limit)` and
 `drawPair(phase)`.
 
 ## Validation
+
+`video_vram.cvc` exercises ROM slices, RAM-to-VRAM copies, VRAM-to-RAM reads,
+nonzero buffer offsets, VDP setup and side-effecting address/value calls.
+Differential assembly and NTSC/PAL memory checks pass. A local Air-Sea title
+port matches all 16 KiB of VRAM and all reported VDP registers against the
+external CVBasic game after 240 frames on both models. This is the initial
+Game 01 screen only; input, audio and gameplay are not part of that milestone.
+The port and original assets remain in ignored local work directories.
 
 `function_values.cvc` covers nested calls to the same helper, calls from helpers,
 byte/word arguments and results, narrowing, arithmetic intermediates, parameter
@@ -335,3 +359,11 @@ Original CVCC source is BSD-3-Clause. Third-party source, binaries, ROMs, emulat
 artifacts, scratch files and internal handoffs are not committed. `.work/`,
 `build/` and `local-docs/` are ignored. See `THIRD_PARTY_NOTICES.md` for dependency
 provenance and the unresolved upstream licensing discrepancy.
+
+### Optional local workbench example
+
+Pass `--local-example /absolute/path/airsea.cvc` to `tools/serve_web.py` to add
+one local source to the example picker. It is served by the loopback workbench
+and compiled through the same frontend, without copying it into public examples.
+Its filename must be a unique simple `.cvc` name. The server does not provide
+arbitrary filesystem browsing.

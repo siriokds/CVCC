@@ -1,0 +1,20 @@
+const uint8_t pixels[8] = {1,2,3,4,5,6,7,8};
+uint8_t buffer[10] = {9,9,9,9,9,9,9,9,9,9};
+uint16_t address = 0x3000;
+uint8_t calls;
+uint8_t frames;
+uint16_t nextAddress() { calls++; return address; }
+uint8_t ink() { address++; return 42; }
+void setup() {
+    videoMode(2);
+    spriteFlicker(0);
+    screenDisable();
+    vramWrite(0x3000, pixels, 2, 4);
+    vramRead(0x3000, buffer, 3, 4);
+    vramWrite(0x3100, buffer, 2, 6);
+    vramPoke(nextAddress(), ink());
+    vramRead(0x3000, buffer, 0, 1);
+    screenEnable();
+    vdpWrite(1, 0xE0);
+}
+void loop() { waitVBlank(); frames++; }

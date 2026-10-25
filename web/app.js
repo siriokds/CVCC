@@ -5,7 +5,7 @@
   let examples=[], current='square', busy=false, lastBuild=null, lastSource='', activeTab='diagnostics', errorLine=null;
   const outputs={diagnostics:'Pronto a compilare.',assembly:'Compila un programma per vedere il codice Z80.',basic:'Compila un programma per vedere il passaggio CVBasic.'};
   const escape=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:setup|loop|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
+  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:setup|loop|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite|videoMode|screenEnable|screenDisable|spriteFlicker|vdpWrite|vramPoke|vramWrite|vramRead)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
   function highlight(source){
     let result='',cursor=0;
     for(const match of source.matchAll(tokens)){
@@ -132,7 +132,15 @@
   $('sound').addEventListener('click',async()=>{try{const on=await player.sound();$('sound').innerHTML='♪ <span>Audio '+(on?'on':'off')+'</span>';}catch(error){outputs.diagnostics+='\nAudio: '+error.message;output('diagnostics');}});
   $('reference-button').addEventListener('click',()=>$('reference').showModal());$('close-reference').addEventListener('click',()=>$('reference').close());
   fetch('/api/config').then(async response=>{if(!response.ok)throw new Error('Server non disponibile');return response.json();}).then(config=>{
-    examples=config.examples;choose('square');$('server-led').className='online';$('connection-label').textContent='LOCALE';$('compile').disabled=false;
+    examples=config.examples;
+    for(const example of examples.filter(e=>e.local)) {
+      const button=document.createElement('button');button.className='file';button.dataset.example=example.id;
+      button.innerHTML=`<span class="file-icon">C+</span><span>${escape(example.id)}.cvc<small>Esempio locale</small></span><span class="file-dot"></span>`;
+      button.addEventListener('click',()=>choose(example.id));
+      document.querySelector('.sidebar-bottom').before(button);
+      const option=document.createElement('option');option.value=example.id;option.textContent=example.id+'.cvc';$('example-select').append(option);
+    }
+    choose('square');$('server-led').className='online';$('connection-label').textContent='LOCALE';$('compile').disabled=false;
     outputs.diagnostics='✓ Compilatore locale pronto.\nAvvio del primo esempio…';output();void compile();
   }).catch(error=>{$('connection-label').textContent='OFFLINE';outputs.diagnostics=error.message;output();});
 })();

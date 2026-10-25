@@ -44,6 +44,8 @@ class Handler(BaseHTTPRequestHandler):
         route = urlsplit(self.path).path
         if route == '/api/config':
             examples = [{'id': name, 'source': (ROOT / 'examples' / f'{name}.cvc').read_text()} for name in ('square', 'counter', 'patrol', 'masks', 'logic', 'states', 'functions')]
+            if self.server.local_example:
+                examples.append(dict(id=self.server.local_example.stem, source=self.server.local_example.read_text(), local=True))
             return self.send(200, dict(examples=examples, player_available=all((self.server.player / f).is_file() for f in ('core.js', 'core.wasm'))))
         files = {'/': ('index.html', 'text/html; charset=utf-8'),
                  '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
@@ -112,12 +114,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8844)
     parser.add_argument('--player-dist', type=Path, required=True, help='Existing GearSC3000 web dist; served read-only, never copied')
+    parser.add_argument('--local-example', type=Path, help='Optional local .cvc example; source is served only by this local workbench')
     args = parser.parse_args()
+    if args.local_example and (args.local_example.suffix != '.cvc' or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]*', args.local_example.stem) or args.local_example.stem in ('square','counter','patrol','masks','logic','states','functions') or not args.local_example.is_file()):
+        parser.error('local example must be an existing .cvc file with a unique simple name')
     if not (ROOT/'build/cvcc').is_file():
         raise SystemExit('Build the frontend first: ./tools/build_frontend.sh')
     (ROOT/'.work/web').mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     server.player = args.player_dist.resolve()
+    server.local_example = args.local_example.resolve() if args.local_example else None
     print(f'CVCC Workbench: http://127.0.0.1:{args.port}', flush=True)
     try:
         server.serve_forever()
