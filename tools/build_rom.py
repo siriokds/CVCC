@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Development pipeline: Tree-sitter frontend -> CVBasic -> sjasmplus, SG-1000 only."""
+"""CVCC Z80 -> sjasmplus, SG-1000. Legacy CVBasic is an opt-in reference."""
 import argparse
 import hashlib
 import json
@@ -8,7 +8,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from gasm80_to_sjasmplus import adapt
 from project_source import expand, remap, file_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +24,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('--out-dir', type=Path, required=True)
+    parser.add_argument('--backend', choices=('z80', 'legacy'), default='z80')
     parser.add_argument('--deps', type=Path, default=ROOT / '.work/deps')
     parser.add_argument('--frontend', type=Path, default=ROOT / 'build/cvcc')
     args = parser.parse_args()
@@ -35,11 +35,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix='cvcc-source-') as temporary:
         flattened = Path(temporary)/'main.cvc'
         flattened.write_text(expanded)
-        compiled = subprocess.run([str(args.frontend.resolve()), str(flattened)], capture_output=True, text=True)
+        compiled = subprocess.run([str(args.frontend.resolve()), *(["--z80"] if args.backend == "z80" else ["--basic"]), str(flattened)], capture_output=True, text=True)
         if compiled.returncode:
             raise RuntimeError(remap(compiled.stderr or compiled.stdout, flattened, mapping))
-        basic = compiled.stdout
+        lowered = compiled.stdout
     lock = json.loads((ROOT / 'dependencies.lock.json').read_text())
+    if args.backend == 'legacy':
+        lock.update(json.loads((ROOT / 'tests/legacy-dependencies.lock.json').read_text()))
     for name, spec in lock.items():
         actual = run(['git', '-C', deps / name, 'rev-parse', 'HEAD']).stdout.strip()
         if actual != spec['commit']:
@@ -53,29 +55,43 @@ def main():
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.cvcc-', dir=dest.parent) as temp:
         work = Path(temp)
-        (work / 'program.bas').write_text(basic)
-        cvbasic = deps / 'CVBasic'
-        c_files = ['cvbasic', 'node', 'driver', 'cpuz80', 'cpu6502', 'cpu9900']
-        run([os.environ.get('CC', 'cc'), '-O2', *[cvbasic / f'{f}.c' for f in c_files], '-o', work / 'cvbasic'])
-        compilation = run([work / 'cvbasic', '--sg1000', work / 'program.bas', work / 'program.gasm.asm', str(cvbasic) + '/'])
-        # A relative OUTPUT keeps the saved assembly reproducible after moving it.
-        converted = adapt((work / 'program.gasm.asm').read_text(), 'program.sg')
-        (work / 'program.sj.asm').write_text(converted)
+        if args.backend == 'z80':
+            (work / 'program.sj.asm').write_text(lowered)
+            for name in ('sg1000.asm', 'font.asm'):
+                shutil.copy2(ROOT / 'runtime' / name, work / name)
+            compilation = subprocess.CompletedProcess([], 0, 'Original CVCC Z80 backend; no CVBasic dependency.\n', '')
+            published = ['program.sj.asm', 'sg1000.asm', 'font.asm']
+        else:
+            from gasm80_to_sjasmplus import adapt
+            (work / 'program.bas').write_text(lowered)
+            cvbasic = deps / 'CVBasic'
+            c_files = ['cvbasic', 'node', 'driver', 'cpuz80', 'cpu6502', 'cpu9900']
+            run([os.environ.get('CC', 'cc'), '-O2', *[cvbasic / f'{f}.c' for f in c_files], '-o', work / 'cvbasic'])
+            compilation = run([work / 'cvbasic', '--sg1000', work / 'program.bas', work / 'program.gasm.asm', str(cvbasic) + '/'])
+            # A relative OUTPUT keeps the saved assembly reproducible after moving it.
+            converted = adapt((work / 'program.gasm.asm').read_text(), 'program.sg')
+            (work / 'program.sj.asm').write_text(converted)
+            published = ['program.bas', 'program.gasm.asm', 'program.sj.asm']
         assembly = run([assembler, '-Wno-fileorg', '--sym=program.sym', '--lst=program.lst', 'program.sj.asm'], cwd=work)
         rom = (work / 'program.sg').read_bytes()
         if not rom or len(rom) > 32768:
             raise RuntimeError('prototype requires a nonempty ROM of at most 32 KiB')
-        metadata = dict(source=str(source), source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        metadata = dict(backend=args.backend, source=str(source), source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
                         project_files={name:hashlib.sha256(file_bytes(text)).hexdigest() for name,text in inputs.items()},
                         frontend_sha256=hashlib.sha256(args.frontend.resolve().read_bytes()).hexdigest(),
-                        dependencies=lock, assembler=run([assembler, '--version']).stdout.strip(),
+                        dependencies=lock,
+                        runtime_sha256={name:hashlib.sha256((ROOT/'runtime'/name).read_bytes()).hexdigest() for name in ('sg1000.asm','font.asm')} if args.backend=='z80' else {},
+                        assembler=run([assembler, '--version']).stdout.strip(),
                         assembler_sha256=hashlib.sha256(Path(assembler).read_bytes()).hexdigest(),
                         rom_bytes=len(rom), rom_sha256=hashlib.sha256(rom).hexdigest())
         (work / 'build.json').write_text(json.dumps(metadata, indent=2) + '\n')
         (work / 'build.log').write_text(compilation.stdout + compilation.stderr + assembly.stdout + assembly.stderr)
         dest.mkdir(parents=True, exist_ok=True)
-        for name in ['program.bas', 'program.gasm.asm', 'program.sj.asm', 'program.sg', 'program.sym', 'program.lst', 'build.json', 'build.log']:
+        for name in published + ['program.sg', 'program.sym', 'program.lst', 'build.json', 'build.log']:
             shutil.copy2(work / name, dest / name)
+        if args.backend == 'z80':
+            for name in ('program.bas', 'program.gasm.asm'):
+                (dest / name).unlink(missing_ok=True)
         print(f'{dest / "program.sg"}: {len(rom)} bytes, SHA-256 {metadata["rom_sha256"]}')
 
 

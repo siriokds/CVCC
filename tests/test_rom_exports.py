@@ -26,6 +26,18 @@ class ExportTests(unittest.TestCase):
                 if len(data)>len(original):
                     self.assertEqual(data[len(original):], b'\xff'*(len(data)-len(original)))
 
+    def test_native_padding_and_boundaries(self):
+        for end in (1,8192,8193,16384,16385,32768):
+            rom=b'\x42'*end+b'\xff'*(next(size for size in SIZES if size>=end)-end)
+            choices=exports(rom,end,backend='z80')
+            self.assertEqual([c['size'] for c in choices],[s for s in SIZES if s>=end])
+            for choice in choices:
+                data=base64.b64decode(choice['rom'])
+                self.assertEqual(data[:end],rom[:end])
+                self.assertEqual(data[end:],b'\xff'*(choice['size']-end))
+        self.assertEqual(exports(b'X'*8192,100,backend='z80'),[])
+        self.assertEqual(exports(b'X'*8192,8192,backend='unknown'),[])
+
     def test_unknown_layout_is_not_trimmed(self):
         original=image(100)
         for rom,end in [(original,0),(original,32768),(original[:-1],100),

@@ -1,0 +1,286 @@
+{
+  "function_values": {
+    "x": [
+      1,
+      100
+    ],
+    "nested": [
+      2,
+      1054
+    ],
+    "paired": [
+      2,
+      8
+    ],
+    "narrow": [
+      1,
+      0
+    ],
+    "wide": [
+      2,
+      1
+    ],
+    "side": [
+      1,
+      2
+    ],
+    "loops": [
+      1,
+      8
+    ],
+    "guarded": [
+      1,
+      2
+    ],
+    "index": [
+      1,
+      1
+    ],
+    "selected": [
+      1,
+      9
+    ],
+    "preserved": [
+      2,
+      10
+    ],
+    "shadow": [
+      1,
+      5
+    ],
+    "passed": [
+      1,
+      10
+    ],
+    "math": [
+      2,
+      260
+    ],
+    "minus": [
+      2,
+      65535
+    ],
+    "chained": [
+      2,
+      503
+    ]
+  },
+  "shifts_logic": {
+    "byteValue": [
+      1,
+      2
+    ],
+    "wordValue": [
+      2,
+      16384
+    ],
+    "leftByte": [
+      1,
+      2
+    ],
+    "leftWord": [
+      2,
+      2
+    ],
+    "rightByte": [
+      1,
+      16
+    ],
+    "rightWord": [
+      2,
+      1
+    ],
+    "narrowShift": [
+      2,
+      128
+    ],
+    "wideShift": [
+      2,
+      32768
+    ],
+    "flags": [
+      1,
+      127
+    ],
+    "index": [
+      1,
+      255
+    ],
+    "visits": [
+      1,
+      4
+    ],
+    "wrappedShift": [
+      1,
+      64
+    ],
+    "nestedShift": [
+      2,
+      256
+    ]
+  },
+  "for_bitwise": {
+    "count": [
+      2,
+      256
+    ],
+    "sum": [
+      2,
+      32640
+    ],
+    "nested": [
+      1,
+      6
+    ],
+    "skipped": [
+      1,
+      0
+    ],
+    "wrapped": [
+      1,
+      0
+    ],
+    "byteValue": [
+      1,
+      134
+    ],
+    "wordValue": [
+      2,
+      9491
+    ],
+    "complemented": [
+      1,
+      90
+    ],
+    "wordComplement": [
+      2,
+      23205
+    ],
+    "precedence": [
+      1,
+      3
+    ],
+    "dynamicLimit": [
+      1,
+      2
+    ],
+    "visits": [
+      1,
+      4
+    ]
+  },
+  "do_while": {
+    "once": [
+      1,
+      2
+    ],
+    "continued": [
+      1,
+      3
+    ],
+    "skipped": [
+      1,
+      0
+    ],
+    "outer": [
+      1,
+      2
+    ],
+    "inner": [
+      1,
+      2
+    ],
+    "nested": [
+      1,
+      4
+    ],
+    "index": [
+      1,
+      255
+    ],
+    "early": [
+      1,
+      1
+    ],
+    "mixed": [
+      1,
+      4
+    ]
+  },
+  "switch": {
+    "state": [
+      2,
+      0
+    ],
+    "fall": [
+      1,
+      3
+    ],
+    "defaultFirst": [
+      1,
+      3
+    ],
+    "skipped": [
+      1,
+      0
+    ],
+    "hits": [
+      1,
+      3
+    ],
+    "i": [
+      1,
+      2
+    ],
+    "afterSwitch": [
+      1,
+      3
+    ],
+    "nested": [
+      1,
+      3
+    ],
+    "returned": [
+      1,
+      1
+    ],
+    "doCount": [
+      1,
+      1
+    ],
+    "whileCount": [
+      1,
+      1
+    ],
+    "stacked": [
+      1,
+      1
+    ]
+  },
+  "functions_arrays": {
+    "sum": [
+      2,
+      6401
+    ],
+    "wrapped": [
+      2,
+      0
+    ],
+    "narrowed": [
+      1,
+      0
+    ],
+    "returned": [
+      1,
+      1
+    ],
+    "negative": [
+      2,
+      59392
+    ],
+    "compared": [
+      1,
+      1
+    ]
+  }
+}

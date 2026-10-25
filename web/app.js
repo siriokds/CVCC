@@ -4,7 +4,7 @@
   let workspace=null;
   const player=new CartridgePlayer($('screen'));
   let examples=[], current='square', currentFile='main.cvc', projectFiles={}, errorFile=null, busy=false, lastBuild=null, lastSource='', activeTab='diagnostics', errorLine=null;
-  const outputs={diagnostics:'Pronto a compilare.',assembly:'Compila un programma per vedere il codice Z80.',basic:'Compila un programma per vedere il passaggio CVBasic.'};
+  const outputs={diagnostics:'Pronto a compilare.',assembly:'Compila un programma per vedere il codice Z80.'};
   const escape=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:setup|loop|sound|soundVolume|controllerRead|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite|videoMode|screenEnable|screenDisable|spriteFlicker|vdpWrite|vramPoke|vramWrite|vramRead)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
   function highlight(source){
@@ -183,7 +183,7 @@
       const result=await response.json();
       if(!response.ok){errorLine=result.line||null;errorFile=result.file||null;throw new Error(result.error||'Compilazione non riuscita.');}
       lastBuild={...result,name,projectId};lastSource=source;
-      outputs.assembly=result.assembly;outputs.basic=result.basic;
+      outputs.assembly=result.assembly;
       outputs.diagnostics=`✓ Parsing e controlli semantici superati\n✓ ROM assemblata con sjasmplus · ${result.rom_bytes.toLocaleString('it-IT')} byte\n✓ Build completata in ${(result.elapsed_ms/1000).toFixed(2)} s\n\nSHA-256  ${result.sha256}`;
       $('build-duration').textContent=(result.elapsed_ms/1000).toFixed(2)+' s';$('build-dot').className='success';
       $('rom-size').innerHTML=(result.rom_bytes/1024)+'<small>KiB</small>';

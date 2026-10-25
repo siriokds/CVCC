@@ -144,8 +144,9 @@ class Handler(BaseHTTPRequestHandler):
                 rom = (out/'program.sg').read_bytes()
                 code_bytes = symbols.get('ROM_END', 0)
                 return finish(200, dict(rom=base64.b64encode(rom).decode(),
-                    exports=exports(rom, code_bytes),
-                    basic=(out/'program.bas').read_text(), assembly=(out/'program.sj.asm').read_text(),
+                    exports=exports(rom, code_bytes, backend=metadata["backend"]),
+                    backend=metadata["backend"],
+                    basic=(out/'program.bas').read_text() if metadata['backend']=='legacy' else '', assembly=(out/'program.sj.asm').read_text(),
                     log=(out/'build.log').read_text(), elapsed_ms=round((time.perf_counter()-started)*1000),
                     rom_bytes=metadata['rom_bytes'], sha256=metadata['rom_sha256'],
                     ram_bytes=symbols.get('RAM_END',0)-symbols.get('RAM_START',0),

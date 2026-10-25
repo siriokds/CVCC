@@ -1,0 +1,23 @@
+uint8_t fontTop[8];
+uint8_t fontMiddle[8];
+uint8_t fontBottom[8];
+uint8_t bitmapNames[16];
+uint8_t pad1;
+uint8_t pad2;
+void setup() {
+    videoMode(0);
+    vramRead(0x208, fontTop, 0, 8);
+    vramRead(0xA08, fontMiddle, 0, 8);
+    vramRead(0x1208, fontBottom, 0, 8);
+    videoMode(1);
+    vramRead(0x18F8, bitmapNames, 0, 16);
+    videoMode(2);
+    sprite(0,10,20,4,15);
+    sprite(31,100,30,8,10);
+    spriteFlicker(1);
+}
+void loop() {
+    waitVBlank();
+    pad1=controllerRead(1);
+    pad2=controllerRead(2);
+}

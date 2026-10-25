@@ -24,7 +24,7 @@ typedef struct {
     TSNode temps[2048]; unsigned temp_bits[2048], temp_count;
     unsigned char calls[128][128], visited[128];
     unsigned loop_ids[64], loop_depth, break_ids[64], break_depth, next_loop, next_bool;
-    int current_function, wait_counter_declared, switch_value_declared, failed;
+    int native, current_function, wait_counter_declared, switch_value_declared, failed;
 } Compiler;
 
 static int kind(TSNode n, const char *s) { return !ts_node_is_null(n) && !strcmp(ts_node_type(n), s); }
@@ -46,13 +46,31 @@ static int equals(Compiler *c, TSNode n, const char *s) {
     return !ts_node_is_null(n) && ts_node_end_byte(n)-ts_node_start_byte(n)==strlen(s)
         && !memcmp(c->source+ts_node_start_byte(n),s,strlen(s));
 }
+/* Large #incbin initializers are visited several times. Cache their named
+ * elements in one linear cursor walk instead of rescanning for every byte. */
+static TSNode initializer_parent;
+static TSNode initializer_elements[8192];
+static unsigned initializer_count;
+static int cache_initializer(TSNode n) {
+    if(!kind(n,"initializer_list") || ts_node_named_child_count(n)>8192)return 0;
+    if(!ts_node_is_null(initializer_parent) && ts_node_eq(n,initializer_parent))return 1;
+    initializer_parent=n;initializer_count=0;
+    TSTreeCursor cursor=ts_tree_cursor_new(n);
+    if(ts_tree_cursor_goto_first_child(&cursor))do {
+        TSNode item=ts_tree_cursor_current_node(&cursor);
+        if(ts_node_is_named(item)&&!kind(item,"comment"))initializer_elements[initializer_count++]=item;
+    }while(ts_tree_cursor_goto_next_sibling(&cursor));
+    ts_tree_cursor_delete(&cursor);return 1;
+}
 static unsigned children(TSNode n) {
+    if(cache_initializer(n))return initializer_count;
     unsigned count=0;
     for (unsigned i=0;i<ts_node_named_child_count(n);i++) if (!kind(ts_node_named_child(n,i),"comment")) count++;
     return count;
 }
 static TSNode child(TSNode n,unsigned index) {
     if(ts_node_is_null(n)) return (TSNode){0};
+    if(cache_initializer(n))return index<initializer_count?initializer_elements[index]:(TSNode){0};
     for (unsigned i=0;i<ts_node_named_child_count(n);i++) {
         TSNode k=ts_node_named_child(n,i);
         if (!kind(k,"comment") && index--==0) return k;
@@ -721,12 +739,17 @@ static int compile(Compiler *c,TSNode root) {
     unsigned line_length=0; int ch;
     while((ch=fgetc(c->out))!=EOF) {
         if(ch=='\n') line_length=0;
-        else if(++line_length>900) { error(c,root,"generated BASIC line is too long; simplify expressions"); break; }
+        else if(++line_length>900 && !c->native) { error(c,root,"generated BASIC line is too long; simplify expressions"); break; }
     }
     return !c->failed;
 }
+#include "backend_z80.h"
 int main(int argc,char **argv) {
-    if(argc!=2) { fprintf(stderr,"Usage: cvcc source.cvc > output.bas\nExperimental SG-1000 frontend (not standard C++).\n"); return 2; }
+    int native=1;
+    if(argc==3 && (!strcmp(argv[1],"--z80") || !strcmp(argv[1],"--basic"))) {
+        native=strcmp(argv[1],"--basic")!=0;argc--;argv++;
+    }
+    if(argc!=2) { fprintf(stderr,"Usage: cvcc [--z80|--basic] source.cvc > output.asm\nExperimental SG-1000 frontend (not standard C++).\n"); return 2; }
     FILE *in=fopen(argv[1],"rb"); if(!in) { perror(argv[1]); return 1; }
     if(fseek(in,0,SEEK_END)||ftell(in)<0||ftell(in)>1024*1024) { fprintf(stderr,"source must be a seekable file of at most 1 MiB\n"); fclose(in); return 1; }
     long length=ftell(in); rewind(in);
@@ -738,13 +761,21 @@ int main(int argc,char **argv) {
     if(!parser||!ts_parser_set_language(parser,tree_sitter_cpp())) { fprintf(stderr,"incompatible Tree-sitter grammar/runtime\n"); free(source); ts_parser_delete(parser); return 1; }
     TSTree *tree=ts_parser_parse_string(parser,NULL,source,(uint32_t)length);
     FILE *out=tmpfile();
-    if(!tree||!out) { fprintf(stderr,"cannot allocate parse/output resources\n"); if(out)fclose(out); ts_tree_delete(tree); ts_parser_delete(parser); free(source); return 1; }
-    Compiler c={0}; c.source=source; c.path=argv[1]; c.out=out;
+    if(!tree||!out) { fprintf(stderr,"cannot allocate parse/output resources\n"); if(out)fclose(out);
+    ts_tree_delete(tree); ts_parser_delete(parser); free(source); return 1; }
+    Compiler c={0}; c.source=source; c.path=argv[1]; c.out=out; c.native=native;
     int ok=compile(&c,ts_tree_root_node(tree));
+    if(ok && native) {
+        /* Keep the existing semantic checks as the shared admission gate.
+           Their temporary reference text is discarded, never compiled. */
+        fclose(out);out=tmpfile();c.out=out;
+        if(!out)ok=0;else ok=compile_z80(&c);
+    }
     if(ok && !ferror(out)) {
         rewind(out); char buffer[4096]; size_t size;
         while((size=fread(buffer,1,sizeof buffer,out))) if(fwrite(buffer,1,size,stdout)!=size) { ok=0; break; }
         if(ferror(out)||fflush(stdout)) ok=0;
     } else ok=0;
-    fclose(out); ts_tree_delete(tree); ts_parser_delete(parser); free(source); return ok?0:1;
+    if(out)fclose(out);
+    ts_tree_delete(tree); ts_parser_delete(parser); free(source); return ok?0:1;
 }

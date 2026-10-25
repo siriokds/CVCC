@@ -24,7 +24,7 @@
       <div class="panel-heading"><span class="panel-index">01</span><h1>Sorgente</h1><span class="language">CVCC / C-LIKE</span></div>
       <div class="editor-wrap"><div id="line-numbers" aria-hidden="true"></div><div class="editor-stack"><pre id="highlight" aria-hidden="true"></pre><textarea id="editor" aria-label="Sorgente CVCC" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off"></textarea></div></div>
       <div class="editor-footer"><span id="cursor">Ln 1, Col 1</span><span>UTF-8 <b>·</b> Tab: 4</span></div>
-      <div class="output-panel"><div class="output-tabs" role="tablist" aria-label="Output compilazione"><button class="output-tab active" data-tab="diagnostics" role="tab" aria-selected="true">Output <span id="build-dot"></span></button><button class="output-tab" data-tab="assembly" role="tab" aria-selected="false">Assembly Z80</button><button class="output-tab" data-tab="basic" role="tab" aria-selected="false">CVBasic</button><span class="output-caption" id="build-duration">IN ATTESA</span></div><pre id="output" role="tabpanel" aria-live="polite">Il compilatore si sta preparando…</pre><button id="goto-error" hidden>Vai alla riga dell’errore ↗</button></div>
+      <div class="output-panel"><div class="output-tabs" role="tablist" aria-label="Output compilazione"><button class="output-tab active" data-tab="diagnostics" role="tab" aria-selected="true">Output <span id="build-dot"></span></button><button class="output-tab" data-tab="assembly" role="tab" aria-selected="false">Assembly Z80</button><span class="output-caption" id="build-duration">IN ATTESA</span></div><pre id="output" role="tabpanel" aria-live="polite">Il compilatore si sta preparando…</pre><button id="goto-error" hidden>Vai alla riga dell’errore ↗</button></div>
     </section>
     <section class="preview-panel" aria-label="Player ROM">
       <div class="panel-heading"><span class="panel-index">02</span><h2>Anteprima</h2><span class="preview-state" id="preview-state">IN ATTESA</span></div>
@@ -38,7 +38,7 @@
       <p id="download-size" class="download-size" aria-live="polite">Compila per scegliere la dimensione.</p>
       <button id="download" class="download" disabled><span>↓</span> Scarica la ROM <span class="extension">.sg</span></button>
       <div class="preview-note"><span class="note-icon">⌁</span><p id="preview-note">Il codice viene compilato su questo Mac.<br>La ROM gira qui, nel player del browser.</p></div>
-      <div class="pipeline"><span>CVCC</span><i>→</i><span>Tree-sitter</span><i>→</i><span>CVBasic</span><i>→</i><strong>sjasmplus</strong></div>
+      <div class="pipeline"><span>CVCC</span><i>→</i><span>Tree-sitter</span><i>→</i><span>Z80</span><i>→</i><strong>sjasmplus</strong></div>
     </section>
   </div>
   <footer class="statusbar"><span><i></i> <span id="status-text">Workspace locale</span></span><span>SG-1000 <b>·</b> Z80 <b>·</b> <span id="source-lines">0 righe</span></span></footer>

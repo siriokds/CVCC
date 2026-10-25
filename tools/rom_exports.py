@@ -5,7 +5,16 @@ SIZES = (8192, 16384, 32768, 49152)
 HEADER = b'TMR SEGA\x00\x00\x00\x00\x11\x78\x00\x4c'
 
 
-def exports(rom, code_bytes):
+def exports(rom, code_bytes, *, backend='legacy'):
+    if backend == 'z80':
+        if (not isinstance(code_bytes, int) or not 0 < code_bytes <= 32768
+                or len(rom) != next((size for size in SIZES if size >= code_bytes), 0)
+                or rom[code_bytes:] != b'\xff'*(len(rom)-code_bytes)):
+            return []
+        return [dict(size=size, rom=base64.b64encode(rom[:code_bytes] + b'\xff'*(size-code_bytes)).decode())
+                for size in SIZES if size >= code_bytes]
+    if backend != 'legacy':
+        return []
     # ROM_END measures executable code + ROM data, not the fixed Sega footer.
     # Small SG-1000 images do not need that optional identification footer.
     if (len(rom) != 32768 or rom[0x7ff0:] != HEADER

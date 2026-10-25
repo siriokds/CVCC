@@ -1,5 +1,6 @@
 # Internal documents and handoffs (local only)
 /local-docs/
+/docs/
 
 # Private dependency checkouts and working files (never publish)
 /.work/

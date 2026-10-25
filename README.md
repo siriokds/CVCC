@@ -5,13 +5,15 @@ and SC-3000. The current prototype parses real C++ syntax with Tree-sitter,
 validates a small CVCC subset, and builds a ROM with **sjasmplus**:
 
 ```text
-source.cvc -> Tree-sitter C++ -> CVCC semantic checks -> generated CVBasic
-           -> unmodified CVBasic -> assembly adapter -> sjasmplus -> program.sg
+source.cvc -> Tree-sitter C++ -> CVCC checks -> original Z80 backend
+           -> original SG-1000 runtime -> sjasmplus -> program.sg
 ```
 
-The generated BASIC is a temporary validation bridge. The intended architecture
-will connect the frontend directly to CVBasic's Z80 engine. CVCC is **not** a
-standard C/C++ compiler, and does not yet provide CVBasic feature parity.
+The default build no longer requires, runs or embeds CVBasic. The backend and
+runtime are original CVCC code. The old pipeline is an optional development
+reference (`--backend legacy`), with its dependency pinned separately under tests.
+CVCC is **not** a standard C/C++ compiler and does not implement every CVBasic
+command; the supported subset is listed below.
 
 CVCC source files use the `.cvc` extension. The conventional project entry is
 `main.cvc`, containing `setup()` and `loop()`; the current CLI accepts an explicit
@@ -46,7 +48,7 @@ The workbench must compile and launch the port using its separate Web player.
 Binary identity is useful for unchanged lowering paths; gameplay equivalence
 and measured resource use are the criteria for the complete port.
 
-The original BASIC already assembles through the current adapter and sjasmplus
+As a historical reference, the original BASIC assembled through the legacy adapter and sjasmplus
 to the **same 32 KiB ROM** as Gasm80 (SHA-256
 `96dfdcbf21ef02f431ed3082f218250b954606f868703f9d7fb642d4a5d3c1b4`).
 The pinned CVBasic reports **654 of 814 available RAM bytes** used. This verifies
@@ -70,14 +72,13 @@ Currently tested on macOS. A C11 compiler, Python 3, Git and sjasmplus are neede
 for this prototype; Gasm80 is needed only for differential tests. Self-contained
 Windows/macOS/Linux packages and WebAssembly remain future work.
 
-Clone the three dependencies below into `.work/deps/`, then check out each
+Clone the two dependencies below into `.work/deps/`, then check out each
 repository at the exact commit in `dependencies.lock.json`:
 
 ```sh
 mkdir -p .work/deps
 git clone https://github.com/tree-sitter/tree-sitter.git .work/deps/tree-sitter
 git clone https://github.com/tree-sitter/tree-sitter-cpp.git .work/deps/tree-sitter-cpp
-git clone https://github.com/nanochess/CVBasic.git .work/deps/CVBasic
 python3 - <<'PY'
 import json, subprocess
 from pathlib import Path
@@ -91,18 +92,18 @@ python3 tools/build_rom.py examples/square/main.cvc --out-dir build/square
 
 Load `build/square/program.sg` in an SG-1000/SC-3000 emulator with the standard
 SG-1000 cartridge mapper. The output directory also contains the intermediate
-BASIC, both assembly dialects, symbols, listing, logs, and build fingerprints.
+Z80 assembly, runtime sources, symbols, listing, logs, and build fingerprints.
 Reassemble the saved assembly from its output directory with
 `sjasmplus -Wno-fileorg program.sj.asm`.
 
-The frontend alone writes BASIC to stdout, with diagnostics on stderr:
+The frontend alone writes Z80 assembly to stdout, with diagnostics on stderr:
 
 ```sh
-build/cvcc examples/counter/main.cvc > build/counter.bas
+build/cvcc examples/counter/main.cvc > build/counter.asm
 python3 tests/test_frontend.py
 ```
 
-Rejected input emits no BASIC. The ROM command leaves the last successful output
+Rejected input emits no assembly. The ROM command leaves the last successful output
 intact on compilation failure; a successful exit is required to use a new build.
 `CVCC_DEPS_DIR`, `CVCC_BUILD_DIR` and `CC` customize the shell build. The ROM
 command accepts `--deps` and `--frontend` explicitly.
@@ -171,9 +172,9 @@ workbench. Live remote writes are not required by these tests.
 The download menu offers the original image and 8, 16, 32 or 48 KiB files.
 Only sizes that fit `ROM_END` (all generated code and ROM data) are enabled.
 Exporting never changes the ROM currently running in the player. The original
-is byte-for-byte unchanged; smaller exports remove only verified padding and
-CVBasic's optional Sega identification footer at 0x7FF0. The footer is retained
-when it fits, and larger images are extended with 0xFF. This is an SG-1000 size
+is byte-for-byte unchanged. Native images have no Sega footer and use verified
+0xFF padding to 8, 16 or 32 KiB; exports may extend this to 48 KiB. The legacy
+format is recognized separately, including its optional identification footer. This is an SG-1000 size
 export, not a new mapper or a change to the compiler's current 32 KiB limit.
 Unknown layouts disable resizing rather than risk dropping meaningful bytes.
 `python3 tests/test_rom_exports.py` checks size boundaries and preservation.
@@ -254,7 +255,7 @@ project and original data remain in ignored local work directories.
 
 ### PSG sound
 
-`sound(channel, periodOrControl, volume)` maps to CVBasic `SOUND` on the
+`sound(channel, periodOrControl, volume)` controls the PSG directly on the
 SG-1000/SC-3000 SN76489. Channel must be a literal 0..3. Tone channels 0..2
 accept a 10-bit divider (0..1023, not Hertz); channel 3 accepts a noise control
 0..7. Volume is linear 0..15, with 0 silent. `soundVolume(channel, volume)`
@@ -330,28 +331,28 @@ Sound continues until changed or muted. These calls do not wait for a frame.
   are checked against array size; other indices have no runtime bounds checks.
 - `waitVBlank()`, `waitVBlank(n)` and its one-frame alias `waitFrame()`.
   The count is an unsigned byte/word expression evaluated once at entry; zero
-  returns immediately. Counted waits use a shared two-byte runtime counter.
-  The current SG-1000 backend emits CVBasic WAIT (HALT with VBlank interrupts
-  enabled); waits belong in normal program flow, not interrupt handlers.
+  returns immediately. Counted waits keep the remaining count in HL.
+  The runtime uses an atomic EI/HALT wait and an IRQ-updated VBlank counter;
+  waits belong in normal program flow, not interrupt handlers.
   Waiting follows machine VBlank timing, not a fixed millisecond duration.
-- `videoMode(0|1|2)` selects a CVBasic video mode (2 is Graphics I).
+- `videoMode(0|1|2)` selects Graphics II with a font (0), Graphics II bitmap layout (1),
+  or Graphics I (2). The original compact font renders lowercase as uppercase.
   `screenDisable()` / `screenEnable()` blank or enable display;
   `spriteFlicker(0|1)` disables/enables runtime sprite cycling.
   `vdpWrite(register, value)` writes a literal register 0..7, and
   `vramPoke(address, value)` writes one byte to VRAM.
   Mode/flicker selectors are literals. Register 1 controls sprite size:
-  for the Air-Sea 8x8 configuration, use `vdpWrite(1, 0xE0)` **after**
-  `screenEnable()`, which restores the backend's 16x16 setting.
+  for the Air-Sea 8x8 configuration, use `vdpWrite(1, 0xE0)`. Screen enable/disable preserves the other register bits.
 - `vramWrite(address, array, offset, length)` copies byte ROM or RAM arrays
   to VRAM; `vramRead(address, array, offset, length)` copies VRAM into a
   writable RAM byte array. Offset and length are literals, length is nonzero,
   and the span must fit the array. Literal VRAM addresses/spans are checked
   against 16 KiB; computed addresses are the caller's responsibility.
-  These lower to CVBasic's interrupt-protected bulk transfers. Large uploads
+  These use original interrupt-protected bulk transfer routines. Large uploads
   belong in screen-disabled setup; frame-time transfers still need a timing budget.
   Numeric arguments can call helpers; their values are preserved in source order.
 - `controllerRead(1)` / `controllerRead(2)` returns an active-high byte mask
-  from the backend's VBlank-updated controller state: up `1`, right `2`, down
+  sampled directly from the controller ports: up `1`, right `2`, down
   `4`, left `8`, fire 1 `64`, fire 2 `128`. The player number must be a literal.
   Read after `waitVBlank()` and store the result to test multiple buttons from
   one sample. Value calls work in helpers, conditions and arguments with the
@@ -362,9 +363,11 @@ Sound continues until changed or muted. These calls do not wait for a frame.
   `defineSprite(first, count, data)`, `sprite(index, y, x, pattern, color)`.
   Sprite API ordering follows CVBasic. Patterns are 16x16, 32 bytes each.
 
-Names are case-sensitive and mapped to internal BASIC symbols. No header is
-needed for either integer type. Arithmetic uses CVBasic's unsigned byte/word
-semantics, including wraparound and truncation on assignment to a narrower type; it does **not** implement C integer promotions.
+Names are case-sensitive and preserved in prefixed assembly symbols. No header
+is needed for either integer type. Arithmetic intermediates are unsigned 16-bit;
+assignment, parameters and returns truncate to their declared width. Shifts mask
+to the left operand width before and after shifting. This does **not** implement
+C integer promotions. Byte destinations use shorter byte operations when equivalent.
 Comparisons and logical operators are currently supported only as conditions,
 not as numeric expression values. Shift counts computed at runtime are rejected.
 Strings currently exclude escapes and non-ASCII characters.
@@ -372,7 +375,7 @@ Strings currently exclude escapes and non-ASCII characters.
 Local declarations, array/reference/pointer parameters, default arguments, unsupported types, macro preprocessing, SFRs, events, banking and other constructs are rejected.
 Diagnostics contain source path and one-based line/column ranges (byte columns).
 Safety limits: 1 MiB source, 256 global symbols, 128 helper functions, 16 parameters per helper, 2048 expression temporaries,
-128 syntax levels, 64 statement levels, 8192 bytes per array; generated BASIC lines must fit the upstream lexer.
+128 syntax levels, 64 statement levels, 8192 bytes per array. The legacy reference path additionally limits BASIC line length.
 These are prototype limits, not the final language specification.
 
 The `examples/patrol/main.cvc` workbench example combines helper functions, indexed RAM byte
@@ -392,93 +395,51 @@ The `examples/functions/main.cvc` workbench example draws two squares moving in 
 directions using `advance(value, period)`, `triangle(value, limit)` and
 `drawPair(phase)`.
 
-## Validation
+## Original Z80 backend and validation
 
-`video_vram.cvc` exercises ROM slices, RAM-to-VRAM copies, VRAM-to-RAM reads,
-nonzero buffer offsets, VDP setup and side-effecting address/value calls.
-Differential assembly and NTSC/PAL memory checks pass. A local Air-Sea title
-port matches all 16 KiB of VRAM and all reported VDP registers against the
-external CVBasic game after 240 frames on both models. This is the initial
-Game 01 screen only; input, audio and gameplay are not part of that milestone.
-The port and original assets remain in ignored local work directories.
+The expression ABI uses HL for full-width results, A for byte destinations,
+static parameter cells and stack snapshots for left-to-right argument evaluation.
+Recursion is rejected. ROM lookup tables of exactly 256 bytes are page-aligned
+for cheaper byte indexing. Scalar and constant-index assignments avoid address
+spills. Hardware APIs use dedicated register conventions. There is no SDCC or
+external C compiler for the generated game.
 
-`function_values.cvc` covers nested calls to the same helper, calls from helpers,
-byte/word arguments and results, narrowing, arithmetic intermediates, parameter
-shadowing and pass-by-value, short-circuit side effects, calls in loop conditions,
-array indices, switch selectors and VBlank counts. Its ROM is compared between
-Gasm80 and sjasmplus and its results checked in SG-1000 NTSC / SC-3000 PAL.
+The runtime provides reset/IM1 IRQ vectors, VBlank waits, a 32-entry sprite
+shadow, optional sprite-order rotation, TMS9918 modes 0/1/2, VRAM read/write,
+controller input and SN76489 tone/noise/volume. Bulk VRAM loops allow at least
+30 Z80 T-states between data accesses. At least 256 bytes are reserved for the
+stack; a conservative call/expression analysis increases that reservation when
+necessary. Assembly rejects ROMs above 32 KiB or RAM plus stack above 1 KiB.
 
-`examples/states/main.cvc` completes repeated circuits on SG-1000 NTSC and SC-3000 PAL,
-with 1,450 checked frames per model confirming one pixel per VBlank. A ROM
-regression checks the helper exit contains RET: an explicit BASIC RETURN
-prevents CVBasic from omitting the epilogue after a return followed by a live
-branch label.
+```sh
+python3 tests/test_frontend.py
+python3 tests/test_native.py
+python3 tests/test_projects.py
+python3 tests/test_rom_exports.py
+python3 tests/test_workspaces.py
+CVCC_EMULATOR=/absolute/path/to/isolated/gearsf7000 python3 tests/test_native_emulator.py
+# With the local workbench running:
+python3 tests/test_web.py
+```
 
-`switch.cvc` checks word selectors, stacked labels, missing/default-in-the-middle
-cases, fall-through, nested switches, mixed loop/switch break and continue, and
-returns from setup, loop and helper functions. Differential assembly and
-180-frame state checks pass on SG-1000 NTSC and SC-3000 PAL.
+Native build tests assemble every public example and language fixture, reassemble
+saved outputs, check failure preservation and build with a dependency directory
+containing only Tree-sitter and its grammar. Headless emulator tests cover nested
+calls, parameters/results, side effects, loops, switches, byte/word arithmetic,
+shifts, short-circuit logic, VRAM transfers and counted waits on SG-1000 and SC-3000.
 
-`do_while.cvc` covers a false first condition, continue-to-test, break, nested
-and mixed for/while/do loops, early return and short-circuit guarded array reads.
-Its ROM passes differential assembly and 180-frame state checks on SG-1000 NTSC
-and SC-3000 PAL.
+The local Air-Sea port has also passed audio stream/PSG checks, dense scroll and
+enemy-load frame cadence, damage/game-over/reset transitions, an entire 12,288-frame
+two-player timer, and per-game high-score persistence checks. The port and its
+assets remain ignored. These are emulator checks, not physical-hardware validation.
+The new code generator intentionally does not produce the old ROM bytes or RAM layout.
 
-`waitVBlank()` and `waitVBlank(1)` lower identically to `waitFrame()`; the counter
-example keeps its exact baseline ROM hash. `wait_vblank.cvc` verifies zero-count
-waits, a 260-frame word count and one update per three VBlanks in NTSC/PAL.
-The count is sampled once, and the caller's variable is not decremented.
+The shared semantic admission pass currently produces and discards a temporary
+BASIC representation internally; this code is CVCC's own and does not load or
+execute CVBasic. Separating that validation from the reference emitter remains
+an internal refactor. `--basic` exposes the old representation explicitly.
 
-`shifts_logic.cvc` exercises byte/word shifts, compound shifts, width truncation,
-operator precedence, logical negation, guarded array reads and short-circuit
-conditions in if/for/while. Its ROM passes differential assembly and state
-checks after 180 frames on both SG-1000 NTSC and SC-3000 PAL.
-
-`for_bitwise.cvc` checks the full 0..255 iteration range with a word counter,
-zero-iteration and descending loops, a changing bound, omitted clauses, nested
-break/continue, early return, byte wraparound, byte/word complement, precedence,
-compound array writes and masks. Its ROM passes Gasm80/sjasmplus differential
-assembly and 180-frame state checks on SG-1000 NTSC and SC-3000 PAL.
-
-`functions_arrays.cvc` is also compared byte-for-byte with a handwritten BASIC
-reference (stable variable names preserve CVBasic's hash-based RAM placement).
-Its ROM has been checked for 180 frames on both SG-1000 NTSC and SC-3000 PAL:
-indexed byte/word reads and writes, initialized RAM, 16-bit wraparound, narrowing,
-negation, unsigned comparison, nested calls and early returns all passed.
-
-The test suite compares the counter example with handwritten BASIC and rebuilds
-CVBasic's original Happy Face example from a local C-like fixture using
-`setup()`/`loop()`. Its sprite data is read from the pinned upstream checkout at
-test time and remains in ignored build output. Both comparisons require full
-ROM byte identity between Gasm80 and the CVCC/sjasmplus pipeline.
-
-Happy Face's 32 KiB ROM matches the earlier CVBasic baseline exactly:
-`20a70be1be44280ae78dbe7de593a6c6386c3aab790abd80fdf2f97ac78d128b`.
-The counter, square, Happy Face and byte-semantics probe have also been run
-for 180 frames each on isolated GearSF7000 SG-1000 NTSC and SC-3000 PAL models.
-Observed checks cover sprite movement, per-frame counter progress, byte overflow,
-unary negation, unsigned comparison and termination of a while loop. These are
-emulator checks, not physical-hardware validation; their artifacts stay local.
-There are also semantic rejection tests, including malformed syntax, undeclared
-symbols, unsupported operators, invalid arrays and invalid calls.
-
-The assembly adapter is experimental and limited to the pinned, unbanked SG-1000
-runtime. It normalizes symbol case and local labels, translates `TIMES`/`FORG`,
-and reserves RAM without emitting it into ROM. `fileorg` warnings are disabled
-for these deliberate address-only changes. Other machines and banking have not
-been validated.
-
-## Repository boundaries
-
-Original CVCC source is BSD-3-Clause. Third-party source, binaries, ROMs, emulator
-artifacts, scratch files and internal handoffs are not committed. `.work/`,
-`build/` and `local-docs/` are ignored. See `THIRD_PARTY_NOTICES.md` for dependency
-provenance and the unresolved upstream licensing discrepancy.
-
-### Optional local workbench example
-
-Pass `--local-example /absolute/path/airsea.cvc` to `tools/serve_web.py` to add
-one local source to the example picker. It is served by the loopback workbench
-and compiled through the same frontend, without copying it into public examples.
-Its filename must be a unique simple `.cvc` name. The server does not provide
-arbitrary filesystem browsing.
+Optional historical reference tests require the separately pinned CVBasic checkout
+from `tests/legacy-dependencies.lock.json` and Gasm80. Enable them with
+`CVCC_TEST_LEGACY=1 python3 tests/test_frontend.py`; they are skipped by default.
+The default toolchain and the native emulator suite do not require either tool.
