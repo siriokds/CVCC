@@ -1,6 +1,9 @@
 # Internal documents and handoffs (local only)
 /local-docs/
 
+# Private dependency checkouts and working files (never publish)
+/.work/
+
 # Disposable experiments and temporary files
 /scratch/
 /tmp/
