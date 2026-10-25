@@ -5,14 +5,17 @@ SIZES = (8192, 16384, 32768, 49152)
 HEADER = b'TMR SEGA\x00\x00\x00\x00\x11\x78\x00\x4c'
 
 
-def exports(rom, code_bytes, *, backend='legacy'):
+def exports(rom, code_bytes, *, backend='legacy', cartridge=None):
     if backend == 'z80':
-        if (not isinstance(code_bytes, int) or not 0 < code_bytes <= 32768
+        if cartridge and cartridge['banked']:
+            return []  # Bank numbering and payload must not change on export.
+        limit = cartridge['rom_limit'] if cartridge else 49152
+        if (not isinstance(code_bytes, int) or not 0 < code_bytes <= limit
                 or len(rom) != next((size for size in SIZES if size >= code_bytes), 0)
                 or rom[code_bytes:] != b'\xff'*(len(rom)-code_bytes)):
             return []
         return [dict(size=size, rom=base64.b64encode(rom[:code_bytes] + b'\xff'*(size-code_bytes)).decode())
-                for size in SIZES if size >= code_bytes]
+                for size in SIZES if code_bytes <= size <= limit]
     if backend != 'legacy':
         return []
     # ROM_END measures executable code + ROM data, not the fixed Sega footer.

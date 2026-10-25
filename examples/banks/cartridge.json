@@ -1,0 +1,8 @@
+{
+  "mapper": "asc16l",
+  "ram_kib": 16,
+  "banks": {
+    "2": "assets/square.bin",
+    "3": "assets/positions.bin"
+  }
+}

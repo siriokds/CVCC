@@ -173,9 +173,9 @@ The download menu offers the original image and 8, 16, 32 or 48 KiB files.
 Only sizes that fit `ROM_END` (all generated code and ROM data) are enabled.
 Exporting never changes the ROM currently running in the player. The original
 is byte-for-byte unchanged. Native images have no Sega footer and use verified
-0xFF padding to 8, 16 or 32 KiB; exports may extend this to 48 KiB. The legacy
-format is recognized separately, including its optional identification footer. This is an SG-1000 size
-export, not a new mapper or a change to the compiler's current 32 KiB limit.
+0xFF padding to 8, 16, 32 or 48 KiB, within the selected cartridge's ROM window.
+Banked ROMs retain their exact size and cannot be resized by the download menu.
+The legacy format is recognized separately, including its optional identification footer.
 Unknown layouts disable resizing rather than risk dropping meaningful bytes.
 `python3 tests/test_rom_exports.py` checks size boundaries and preservation.
 
@@ -188,8 +188,8 @@ multi-user compilation service.
 
 Only the two specified player artifacts are served from the external directory;
 no emulator code, private game library or WebAssembly binary is copied into this
-repository. The player adapter uses its published `_web_*` ABI (SG-1000 1 KiB
-mapper, NTSC, RGB565 video, 48 kHz audio). At ROM load, the adapter requests
+repository. The player adapter uses its published `_web_*` ABI (project-selected mapper and RAM,
+NTSC, RGB565 video, 48 kHz audio). At ROM load, the adapter requests
 60 Hz through `_web_set_target_fps` and uses the effective rate returned by the
 core. Older player builds without that API retain native timing. Native emulator
 validation continues to use the original NTSC/PAL timing. The browser UI does not expose emulator
@@ -395,6 +395,82 @@ The `examples/functions/main.cvc` workbench example draws two squares moving in 
 directions using `advance(value, period)`, `triangle(value, limit)` and
 `drawPair(phase)`.
 
+## Cartridge profiles and data banks
+
+Open **Cartuccia del progetto** above the player to choose the mapper. The choice
+is stored as `cartridge.json` beside `main.cvc`, included in local/GitHub saves,
+browser drafts and ZIP downloads. Compilation and the player use that same profile.
+Projects without this file retain `sg1000`. The memory profiles are defined in
+`src/cartridges.h`; `build/cvcc --list-cartridges` exposes them to the workbench.
+
+| `mapper` | Fixed ROM | Usable physical RAM | Data banks |
+| --- | --- | --- | --- |
+| `sg1000` | Up to 48 KiB | `$C000–$C3FF`, 1 KiB | No |
+| `sc3000` | Up to 32 KiB | `$C000–$C7FF`, 2 KiB | No |
+| `sc3000-16k` | Up to 32 KiB | `$8000–$BFFF` cartridge + `$C000–$C7FF` console, 18 KiB | No |
+| `asc16l` | 32 KiB | `$C000–$FFFF`, 16 KiB; optionally 8 KiB at `$C000–$DFFF` | 16 KiB at `$8000–$BFFF` |
+| `dahjee-b` | Up to 48 KiB | `$C000–$DFFF`, 8 KiB | No |
+| `sega-dahjee-b` | 32 KiB | `$C000–$DFFE`, 8 KiB minus one reserved byte | 16 KiB at `$8000–$BFFF` |
+
+SC-3000 profiles require an SC-3000's physical 2 KiB console RAM. The Web player
+uses that machine. All RAM budgets include globals, parameters, runtime state and
+stack. ASC16L's 8 KiB option does not count its mirrored addresses twice. On Sega
+315-5208, writing the bank latch at `$FFFF` also writes Dahjee B RAM at `$DFFF`;
+the compiler excludes that byte from allocation and stack. No emulator sources
+are incorporated into CVCC; these are original implementations of the memory maps.
+
+Example `cartridge.json` (see `examples/banks`):
+
+```json
+{
+  "mapper": "asc16l",
+  "ram_kib": 16,
+  "banks": {
+    "2": "assets/square.bin",
+    "3": "assets/positions.bin"
+  }
+}
+```
+
+`ram_kib` is optional and only valid for ASC16L (8 or 16, default 16). Bank keys
+are physical 16 KiB page numbers, 2..255. Pages 0 and 1 contain all functions,
+IRQ code and ordinary `const` arrays. Files contain 1..16384 bytes, padded with
+`0xFF`; omitted pages are filled with `0xFF`. Paths stay inside the project.
+The existing 1 MiB project limit still applies in the IDE. A banked image has
+at least three pages (48 KiB); a six-page/96 KiB image is also valid.
+
+```c
+x = bankRead(3, offset);                // One byte from a data bank.
+vramWriteBank(0x3800, 2, 0, 32);        // VRAM address, bank, offset, length.
+```
+
+Bank numbers are literals and must fit the generated image. `bankRead` accepts
+an expression for the offset; dynamic offsets wrap within the 16 KiB page,
+while out-of-range literal offsets are rejected. `vramWriteBank` requires literal
+offset and nonzero length and rejects transfers crossing the page boundary.
+Both APIs select the bank immediately before access, after evaluating expressions;
+there is no implicit bank state for callers to maintain. IRQ code stays fixed and
+does not change the bank. Functions and ordinary arrays are not automatically
+spread across banks. Banked functions are outside this first implementation.
+
+The build directory contains the generated assembly, runtime and padded bank
+files; rerunning sjasmplus there reproduces the entire ROM. CLI lowering accepts
+`--cartridge ID`, `--ram-kib 8|16`, and `--bank-count N`; without project assets
+its data banks are empty. For normal builds use `tools/build_rom.py PROJECT`.
+ROM identification signatures remain optional and are not injected: when opening
+a downloaded ROM in a separate emulator, select its mapper manually. The CVCC
+player selects it explicitly from build metadata.
+
+Cartridge tests cover memory overflow, 48 KiB linear ROMs, bank payload/reassembly,
+invalid configurations, and export limits. With the optional Web core they also
+execute RAM alias checks, multiple bank switches (including 96 KiB images), VRAM
+transfers and reset on every profile:
+
+```sh
+python3 tests/test_cartridges.py
+CVCC_WEB_CORE=/absolute/path/to/GearSF7000/platforms/web/dist/core.js python3 tests/test_cartridges.py
+```
+
 ## Original Z80 backend and validation
 
 The expression ABI uses HL for full-width results, A for byte destinations,
@@ -409,7 +485,8 @@ shadow, optional sprite-order rotation, TMS9918 modes 0/1/2, VRAM read/write,
 controller input and SN76489 tone/noise/volume. Bulk VRAM loops allow at least
 30 Z80 T-states between data accesses. At least 256 bytes are reserved for the
 stack; a conservative call/expression analysis increases that reservation when
-necessary. Assembly rejects ROMs above 32 KiB or RAM plus stack above 1 KiB.
+necessary. Assembly rejects ROM or RAM plus stack beyond the selected cartridge's
+physical capacity. RAM allocation is counted without wrapping at $FFFF.
 
 ```sh
 python3 tests/test_frontend.py

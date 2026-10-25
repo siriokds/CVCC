@@ -3,10 +3,11 @@
   const editor=$('editor');
   let workspace=null;
   const player=new CartridgePlayer($('screen'));
+  let cartridgeProfiles=[];
   let examples=[], current='square', currentFile='main.cvc', projectFiles={}, errorFile=null, busy=false, lastBuild=null, lastSource='', activeTab='diagnostics', errorLine=null;
   const outputs={diagnostics:'Pronto a compilare.',assembly:'Compila un programma per vedere il codice Z80.'};
   const escape=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:setup|loop|sound|soundVolume|controllerRead|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite|videoMode|screenEnable|screenDisable|spriteFlicker|vdpWrite|vramPoke|vramWrite|vramRead)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
+  const tokens=/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b(?:uint8_t|uint16_t|void|const)\b|\b(?:if|else|while|do|for|switch|case|default|break|continue|return)\b|\b(?:setup|loop|sound|soundVolume|bankRead|vramWriteBank|controllerRead|waitFrame|waitVBlank|clearScreen|printAt|defineSprite|sprite|videoMode|screenEnable|screenDisable|spriteFlicker|vdpWrite|vramPoke|vramWrite|vramRead)\b|\b(?:0[xX][0-9a-fA-F]+|\d+)\b/g;
   function highlight(source){
     let result='',cursor=0;
     for(const match of source.matchAll(tokens)){
@@ -32,7 +33,7 @@
     const dirty=!!lastBuild&&(current!==lastBuild.projectId||projectText()!==lastSource);
     $('dirty-mark').hidden=!dirty;
     if(dirty)$('preview-note').textContent='Modifiche da compilare. Il player mostra l’ultima ROM valida.';
-    updateCursor();syncScroll();
+    updateCursor();syncScroll();updateCartridge();
   }
   function updateCursor(){const prefix=editor.value.slice(0,editor.selectionStart);const lines=prefix.split('\n');$('cursor').textContent=`Ln ${lines.length}, Col ${lines.at(-1).length+1}`;}
   function syncScroll(){$('highlight').scrollTop=editor.scrollTop;$('highlight').scrollLeft=editor.scrollLeft;$('line-numbers').scrollTop=editor.scrollTop;}
@@ -129,6 +130,7 @@
     projectFiles={...project.files};
     try{const draft=JSON.parse(localStorage.getItem('cvcc-project-'+id)||'null');
       if(draft){for(const name of Object.keys(projectFiles))if(typeof projectFiles[name]==='string'&&typeof draft[name]==='string')projectFiles[name]=draft[name];}
+      if(typeof draft?.['cartridge.json']==='string')projectFiles['cartridge.json']=draft['cartridge.json'];
       if(!draft&&Object.keys(projectFiles).length===1){const legacy=localStorage.getItem('cvcc-draft-'+id);if(legacy!==null)projectFiles['main.cvc']=legacy;}
     }catch{}
     currentFile='main.cvc';closedProjects.delete(current);showFile();
@@ -136,6 +138,34 @@
     $('current-name').textContent=(project.label||id)+'/main.cvc';$('file-select').value=currentFile;
     editor.scrollTop=0;editor.scrollLeft=0;workspace?.select(project);updateEditor();renderTree();
   }
+  function updateCartridge(){
+    try{
+      const config=JSON.parse(projectFiles['cartridge.json']||'{}');
+      const profile=cartridgeProfiles.find(p=>p.id===(config.mapper||'sg1000'));
+      $('cartridge-mapper').value=profile?.id||'';
+      $('cartridge-ram-label').hidden=profile?.id!=='asc16l';
+      $('cartridge-ram').value=String(config.ram_kib||16);
+      $('cartridge-note').textContent=profile ? (profile.banked?'Codice fisso: 32 KB. Banchi dati da 16 KB configurabili in cartridge.json.':'ROM fino a '+profile.rom_limit/1024+' KB. RAM: '+(profile.ram_end-profile.ram_start)/1024+' KB.')+' La scelta sarà applicata alla prossima compilazione.' : 'Mapper sconosciuto in cartridge.json.';
+    }catch{$('cartridge-note').textContent='Correggi cartridge.json prima di cambiare mapper.';}
+  }
+  function changeCartridge(){
+    if(busy||workspace?.pending){updateCartridge();return;}
+    persist();
+    try{
+      const config=JSON.parse(projectFiles['cartridge.json']||'{}');
+      const profile=cartridgeProfiles.find(p=>p.id===$('cartridge-mapper').value);
+      if(!profile)throw new Error('Scegli un mapper valido.');
+      if(!profile.banked&&Object.keys(config.banks||{}).length)throw new Error('Questo progetto usa banchi dati: rimuovi la configurazione banks prima di scegliere un mapper senza banchi.');
+      config.mapper=profile.id;
+      if(profile.id==='asc16l')config.ram_kib=Number($('cartridge-ram').value);else delete config.ram_kib;
+      projectFiles['cartridge.json']=JSON.stringify(config,null,2)+'\n';
+      if(currentFile==='cartridge.json')showFile();
+      $('file-select').replaceChildren(...Object.keys(projectFiles).map(name=>new Option(name,name)));$('file-select').value=currentFile;
+      persist();updateEditor();renderTree();
+    }catch(error){updateCartridge();$('cartridge-note').textContent=error.message;}
+  }
+  $('cartridge-mapper').addEventListener('change',changeCartridge);
+  $('cartridge-ram').addEventListener('change',changeCartridge);
   function output(tab=activeTab){
     activeTab=tab;$('output').textContent=outputs[tab];
     $('output').classList.toggle('error',tab==='diagnostics'&&!!errorLine);
@@ -157,7 +187,7 @@
     const item=selectedExport();
     $('download').disabled=!item;
     if(!item)return;
-    $('download-size').textContent=`${item.size.toLocaleString('it-IT')} byte · codice e dati: ${lastBuild.code_bytes.toLocaleString('it-IT')} byte`;
+    $('download-size').textContent=`${item.size.toLocaleString('it-IT')} byte · codice e dati: ${(lastBuild.code_bytes+(lastBuild.bank_data_bytes||0)).toLocaleString('it-IT')} byte`;
     $('download').title='Scarica l’ultima ROM compilata: '+lastBuild.name+item.suffix+'.sg';
   }
   function exportChoices(){
@@ -184,15 +214,15 @@
       if(!response.ok){errorLine=result.line||null;errorFile=result.file||null;throw new Error(result.error||'Compilazione non riuscita.');}
       lastBuild={...result,name,projectId};lastSource=source;
       outputs.assembly=result.assembly;
-      outputs.diagnostics=`✓ Parsing e controlli semantici superati\n✓ ROM assemblata con sjasmplus · ${result.rom_bytes.toLocaleString('it-IT')} byte\n✓ Build completata in ${(result.elapsed_ms/1000).toFixed(2)} s\n\nSHA-256  ${result.sha256}`;
+      outputs.diagnostics=`✓ ${result.cartridge.label} · RAM disponibile: ${result.cartridge.ram_end-result.cartridge.ram_start} byte\n✓ Parsing e controlli semantici superati\n✓ ROM assemblata con sjasmplus · ${result.rom_bytes.toLocaleString('it-IT')} byte\n✓ Build completata in ${(result.elapsed_ms/1000).toFixed(2)} s\n\nSHA-256  ${result.sha256}`;
       $('build-duration').textContent=(result.elapsed_ms/1000).toFixed(2)+' s';$('build-dot').className='success';
       $('rom-size').innerHTML=(result.rom_bytes/1024)+'<small>KiB</small>';
-      $('code-size').innerHTML=result.code_bytes.toLocaleString('it-IT')+'<small>byte</small>';
+      $('code-size').innerHTML=(result.code_bytes+(result.bank_data_bytes||0)).toLocaleString('it-IT')+'<small>byte</small>';
       $('ram-size').innerHTML=result.ram_bytes+'<small>byte</small>';
       exportChoices();
       $('status-text').textContent='Build riuscita · '+name+'.sg';
       try{
-        await player.load(bytes(result.rom));
+        await player.load(bytes(result.rom),result.cartridge);
         $('empty-screen').hidden=true;$('pause-overlay').hidden=true;$('power-led').className='on';
         $('preview-state').textContent='IN ESECUZIONE';$('preview-state').className='preview-state live';
         $('fps').textContent=player.fps.toFixed(2)+' FPS';
@@ -253,7 +283,8 @@
     }
   });
   fetch('/api/config').then(async response=>{if(!response.ok)throw new Error('Server non disponibile');return response.json();}).then(config=>{
-    examples=config.examples;
+    examples=config.examples;cartridgeProfiles=config.cartridges;
+    $('cartridge-mapper').replaceChildren(...cartridgeProfiles.map(p=>new Option(p.label,p.id)));$('cartridge-mapper').disabled=false;
     $('example-select').replaceChildren(...examples.map(project=>new Option(project.id,project.id)));
     choose('square');$('server-led').className='online';$('connection-label').textContent='LOCALE';$('compile').disabled=false;
     outputs.diagnostics='✓ Compilatore locale pronto.\nAvvio del primo esempio…';output();void compile();

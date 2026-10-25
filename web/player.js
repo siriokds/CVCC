@@ -25,7 +25,7 @@ class CartridgePlayer {
   releaseKeys(){this.held.clear();this.updatePad();}
   updatePad(){const masks=[0,0];for(const key of this.held){const code=this.keys.get(key);masks[code>>4]|=1<<(code&15);}for(let port=0;port<2;port++)this.core?._web_pad(port,masks[port]);}
   flushAudio(){for(const node of this.nodes){try{node.stop();}catch{}}this.nodes.clear();this.audioTime=0;}
-  async load(bytes){
+  async load(bytes, cartridge){
     await this.ready;
     this.running=false; this.flushAudio(); this.releaseKeys();
     const core=this.core, ptr=core._malloc(bytes.length);
@@ -33,7 +33,11 @@ class CartridgePlayer {
     let ok;
     try{
       core.HEAPU8.set(bytes,ptr);
-      core._web_set_mapper(7); // ABI index: SG-1000 1 KiB cartridge.
+      core._web_set_mapper(cartridge?.web_mapper ?? 7);
+      if(cartridge?.id==='asc16l') {
+        if(typeof core._web_set_asc16l_ram!=='function')throw new Error('Aggiorna il player GearSF7000: manca la selezione RAM ASC16L.');
+        core._web_set_asc16l_ram(cartridge.ram_kib);
+      }
       core._web_set_timing(1); // NTSC.
       core._web_set_borders(0);
       ok=core._web_load(ptr,bytes.length);

@@ -13,7 +13,8 @@ from workspace_store import WorkspaceStore, Conflict
 
 FILES = {'main.cvc': 'void setup() {}\nvoid loop() {waitFrame();}\n',
          'data/image.bin': {'base64': base64.b64encode(bytes(range(256))).decode()},
-         'logic/game.h': '#pragma once\n'}
+         'logic/game.h': '#pragma once\n',
+         'cartridge.json': '{"mapper":"asc16l","banks":{"2":"data/image.bin"}}\n'}
 
 
 class LocalTests(unittest.TestCase):

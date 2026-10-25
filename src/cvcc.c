@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cartridges.h"
+
 extern const TSLanguage *tree_sitter_cpp(void);
 
 typedef struct { char name[64]; int array, size, initialized, word, constant; TSNode value; } Symbol;
@@ -122,7 +124,7 @@ static void declare(Compiler *c,TSNode n) {
     if (kind(decl,"init_declarator")) { val=field(decl,"value"); decl=field(decl,"declarator"); }
     int array=kind(decl,"array_declarator"); TSNode name_node=array?field(decl,"declarator"):decl;
     char name[64]; if (!identifier(c,name_node,name)) return;
-    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead","sound","soundVolume"};
+    const char *reserved[]={"setup","loop","waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead","sound","soundVolume","bankRead","vramWriteBank"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(name,reserved[i])) {
         error(c,n,"reserved entry point or builtin name"); return;
     }
@@ -159,7 +161,7 @@ static void function(Compiler *c,TSNode n) {
         *slot=body; return;
     }
     char id[64]; if (!identifier(c,name,id)) return;
-    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead","sound","soundVolume"};
+    const char *reserved[]={"waitFrame","waitVBlank","clearScreen","printAt","defineSprite","sprite","videoMode","screenEnable","screenDisable","spriteFlicker","vdpWrite","vramPoke","vramWrite","vramRead","controllerRead","sound","soundVolume","bankRead","vramWriteBank"};
     for(unsigned i=0;i<sizeof reserved/sizeof reserved[0];i++) if(!strcmp(id,reserved[i])) { error(c,name,"reserved builtin name"); return; }
     for(unsigned i=0;i<c->function_count;i++) if(!strcmp(id,c->functions[i].name)) { error(c,name,"duplicate function"); return; }
     if(c->function_count==128) { error(c,name,"too many functions (maximum 128)"); return; }
@@ -216,7 +218,7 @@ static Symbol *access(Compiler *c,TSNode n,int writing) {
 }
 /* CVCC integers retain byte/word width rather than C integer promotions. */
 static unsigned width(Compiler *c,TSNode n) {
-    if(kind(n,"call_expression")) { if(equals(c,field(n,"function"),"controllerRead")) return 8; int id=function_id(c,n); return id>=0 && c->functions[id].result==1?16:8; }
+    if(kind(n,"call_expression")) { if(equals(c,field(n,"function"),"controllerRead") || equals(c,field(n,"function"),"bankRead")) return 8; int id=function_id(c,n); return id>=0 && c->functions[id].result==1?16:8; }
     if(kind(n,"identifier") || kind(n,"subscript_expression")) {
         Symbol *s=lookup(c,kind(n,"identifier")?n:field(n,"argument"));
         return s && s->word?16:8;
@@ -315,9 +317,28 @@ static void controller_read(Compiler *c,TSNode n) {
     unsigned t=c->temp_count++; c->temps[t]=n; c->temp_bits[t]=8;
     fprintf(c->out,"DIM cvcc_t%u\ncvcc_t%u = CONT%u\n",t,t,player);
 }
+/* Bank arguments are explicit physical page numbers. The two fixed pages
+ * contain code; data APIs never expose them as writable or movable storage. */
+static int data_bank(Compiler *c,TSNode n) {
+    unsigned bank;
+    if(!c->native || !cartridge->bank_register) { error(c,n,"bank access requires native ASC16L or Sega 315-5208 + Dahjee B");return 0; }
+    if(!number(c,n,cartridge_banks-1,&bank))return 0;
+    if(bank<2) { error(c,n,"data banks start at 2; banks 0 and 1 contain fixed code");return 0; }
+    return 1;
+}
+static void bank_read(Compiler *c,TSNode n) {
+    TSNode args=field(n,"arguments");unsigned offset;
+    if(children(args)!=2) { error(c,n,"bankRead expects literal bank and byte offset");return; }
+    if(!data_bank(c,child(args,0)))return;
+    if(kind(child(args,1),"number_literal") && !number(c,child(args,1),16383,&offset))return;
+    prepare(c,child(args,1));expression(c,child(args,1));
+    if(c->temp_count==2048) { error(c,n,"too many expression temporaries");return; }
+    unsigned t=c->temp_count++;c->temps[t]=n;c->temp_bits[t]=8;
+    fprintf(c->out,"\nDIM cvcc_t%u\n",t);
+}
 static void prepare(Compiler *c,TSNode n) {
     if(c->failed || !has_call(n)) return;
-    if(kind(n,"call_expression")) { if(equals(c,field(n,"function"),"controllerRead")) controller_read(c,n); else user_call(c,n,1); return; }
+    if(kind(n,"call_expression")) { if(equals(c,field(n,"function"),"controllerRead")) controller_read(c,n); else if(equals(c,field(n,"function"),"bankRead")) bank_read(c,n); else user_call(c,n,1); return; }
     if(kind(n,"binary_expression")) {
         snapshot(c,field(n,"left"));
         // Shift counts remain compile-time constants.
@@ -379,7 +400,18 @@ static void literal_string(Compiler *c,TSNode n) {
 }
 static void builtin(Compiler *c,TSNode n) {
     TSNode fn=field(n,"function"), args=field(n,"arguments"); unsigned count=children(args);
-    if(equals(c,fn,"controllerRead")) { controller_read(c,n);
+    if(equals(c,fn,"bankRead")) { bank_read(c,n);
+    } else if(equals(c,fn,"vramWriteBank")) {
+        unsigned offset,length,address;
+        if(count!=4) { error(c,n,"vramWriteBank expects VRAM address, literal bank, offset and length");return; }
+        if(!data_bank(c,child(args,1)) || !number(c,child(args,2),16383,&offset) || !number(c,child(args,3),16384,&length))return;
+        if(!length || offset+length>16384) { error(c,n,"transfer must fit one 16 KiB data bank");return; }
+        if(kind(child(args,0),"number_literal")) {
+            if(!number(c,child(args,0),16383,&address))return;
+            if(address+length>16384) { error(c,n,"VRAM transfer exceeds 16 KiB");return; }
+        }
+        prepare(c,child(args,0));expression(c,child(args,0));fputc('\n',c->out);
+    } else if(equals(c,fn,"controllerRead")) { controller_read(c,n);
     } else if(equals(c,fn,"sound") || equals(c,fn,"soundVolume")) {
         int volume_only=equals(c,fn,"soundVolume"); unsigned channel,value;
         if(count!=(volume_only?2u:3u)) { error(c,args,"sound expects channel, period/control, volume; soundVolume expects channel, volume"); return; }
@@ -746,10 +778,32 @@ static int compile(Compiler *c,TSNode root) {
 #include "backend_z80.h"
 int main(int argc,char **argv) {
     int native=1;
-    if(argc==3 && (!strcmp(argv[1],"--z80") || !strcmp(argv[1],"--basic"))) {
-        native=strcmp(argv[1],"--basic")!=0;argc--;argv++;
+    if(argc==2 && !strcmp(argv[1],"--list-cartridges")) { list_cartridges(); return 0; }
+    while(argc>2 && argv[1][0]=='-') {
+        if(!strcmp(argv[1],"--z80") || !strcmp(argv[1],"--basic")) {
+            native=strcmp(argv[1],"--basic")!=0;argc--;argv++;
+        } else if(argc>3 && !strcmp(argv[1],"--cartridge")) {
+            cartridge=NULL;
+            for(unsigned i=0;i<sizeof cartridges/sizeof cartridges[0];i++)
+                if(!strcmp(argv[2],cartridges[i].id))cartridge=&cartridges[i];
+            if(!cartridge) { fputs("Unknown cartridge profile\n",stderr);return 2; }
+            argc-=2;argv+=2;
+        } else if(argc>3 && (!strcmp(argv[1],"--ram-kib") || !strcmp(argv[1],"--bank-count"))) {
+            char *end; unsigned long value=strtoul(argv[2],&end,10);
+            if(!*argv[2] || *end || value>256) { fputs("Invalid cartridge size\n",stderr);return 2; }
+            if(!strcmp(argv[1],"--ram-kib")) {
+                if(value!=8 && value!=16) { fputs("RAM must be 8 or 16 KiB\n",stderr);return 2; }
+                cartridge_ram_kib=(unsigned)value;
+            }
+            else cartridge_banks=(unsigned)value;
+            argc-=2;argv+=2;
+        } else break;
     }
-    if(argc!=2) { fprintf(stderr,"Usage: cvcc [--z80|--basic] source.cvc > output.asm\nExperimental SG-1000 frontend (not standard C++).\n"); return 2; }
+    if(argc!=2) { fprintf(stderr,"Usage: cvcc [--z80|--basic] [--cartridge ID] [--ram-kib 8|16] [--bank-count N] source.cvc > output.asm\n"); return 2; }
+    if((cartridge_ram_kib && (cartridge->web_mapper!=4 || (cartridge_ram_kib!=8 && cartridge_ram_kib!=16)))
+       || cartridge_banks<3 || (!native && cartridge!=&cartridges[0])) {
+        fputs("Invalid cartridge options for this backend\n",stderr);return 2;
+    }
     FILE *in=fopen(argv[1],"rb"); if(!in) { perror(argv[1]); return 1; }
     if(fseek(in,0,SEEK_END)||ftell(in)<0||ftell(in)>1024*1024) { fprintf(stderr,"source must be a seekable file of at most 1 MiB\n"); fclose(in); return 1; }
     long length=ftell(in); rewind(in);

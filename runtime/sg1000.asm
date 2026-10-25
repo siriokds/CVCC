@@ -4,7 +4,7 @@
 cvcc_start:
  di
  im 1
- ld sp,$c400
+ ld sp,STACK_TOP
  xor a
  ld hl,RAM_START
  ld de,RAM_START+1

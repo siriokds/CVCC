@@ -1,0 +1,18 @@
+// Code stays in the fixed 32 KB. Assets live in cartridge data banks.
+uint8_t phase;
+uint8_t x;
+
+void setup() {
+    clearScreen();
+    printAt(34, "CVCC DATA BANKS");
+    printAt(98, "GRAPHICS: BANK 2");
+    printAt(130, "MOVEMENT: BANK 3");
+    vramWriteBank(0x3800, 2, 0, 32);
+}
+
+void loop() {
+    waitVBlank();
+    phase = (phase + 1) & 31;
+    x = bankRead(3, phase);
+    sprite(0, 96, x, 0, 6);
+}

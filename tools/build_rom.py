@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from project_source import expand, remap, file_bytes
+from cartridge import load as load_cartridge, append_banks
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,10 +33,17 @@ def main():
     # Validate before touching the destination. Rejected input never yields a ROM.
     if source.is_dir(): source = source/'main.cvc'
     expanded, mapping, inputs = expand(source)
+    profile, banks, cartridge_inputs = load_cartridge(source.parent, args.frontend.resolve())
+    inputs.update(cartridge_inputs)
+    if args.backend == 'legacy' and 'cartridge.json' in inputs:
+        raise ValueError('Cartridge profiles require the native Z80 backend')
+    options = ['--z80', '--cartridge', profile['id']]
+    if profile['ram_kib'] is not None: options += ['--ram-kib', str(profile['ram_kib'])]
+    if profile['banked']: options += ['--bank-count', str(profile['bank_count'])]
     with tempfile.TemporaryDirectory(prefix='cvcc-source-') as temporary:
         flattened = Path(temporary)/'main.cvc'
         flattened.write_text(expanded)
-        compiled = subprocess.run([str(args.frontend.resolve()), *(["--z80"] if args.backend == "z80" else ["--basic"]), str(flattened)], capture_output=True, text=True)
+        compiled = subprocess.run([str(args.frontend.resolve()), *(options if args.backend == "z80" else ["--basic"]), str(flattened)], capture_output=True, text=True)
         if compiled.returncode:
             raise RuntimeError(remap(compiled.stderr or compiled.stdout, flattened, mapping))
         lowered = compiled.stdout
@@ -60,7 +68,7 @@ def main():
             for name in ('sg1000.asm', 'font.asm'):
                 shutil.copy2(ROOT / 'runtime' / name, work / name)
             compilation = subprocess.CompletedProcess([], 0, 'Original CVCC Z80 backend; no CVBasic dependency.\n', '')
-            published = ['program.sj.asm', 'sg1000.asm', 'font.asm']
+            published = ['program.sj.asm', 'sg1000.asm', 'font.asm'] + append_banks(work, profile, banks)
         else:
             from gasm80_to_sjasmplus import adapt
             (work / 'program.bas').write_text(lowered)
@@ -74,9 +82,9 @@ def main():
             published = ['program.bas', 'program.gasm.asm', 'program.sj.asm']
         assembly = run([assembler, '-Wno-fileorg', '--sym=program.sym', '--lst=program.lst', 'program.sj.asm'], cwd=work)
         rom = (work / 'program.sg').read_bytes()
-        if not rom or len(rom) > 32768:
-            raise RuntimeError('prototype requires a nonempty ROM of at most 32 KiB')
-        metadata = dict(backend=args.backend, source=str(source), source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        if not rom or len(rom) > (profile['bank_count']*16384 if profile['banked'] else profile['rom_limit']):
+            raise RuntimeError('ROM exceeds cartridge capacity')
+        metadata = dict(backend=args.backend, cartridge=profile, bank_data_bytes=sum(map(len, banks.values())), source=str(source), source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
                         project_files={name:hashlib.sha256(file_bytes(text)).hexdigest() for name,text in inputs.items()},
                         frontend_sha256=hashlib.sha256(args.frontend.resolve().read_bytes()).hexdigest(),
                         dependencies=lock,

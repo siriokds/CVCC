@@ -7,6 +7,10 @@ import binascii
 LIMIT = 1024 * 1024
 BINARY_SUFFIXES = ('.bin', '.chr', '.pal', '.map', '.dat')
 
+def project_path(name):
+    return name == 'cartridge.json' or Path(name).suffix in ('.cvc', '.h') + BINARY_SUFFIXES
+
+
 def file_bytes(value):
     if isinstance(value, str): return value.encode()
     if not isinstance(value, dict) or set(value) != {'base64'} or not isinstance(value['base64'], str):
@@ -25,7 +29,7 @@ def validate_files(files):
         if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_. /-]+', name) or '\\' in name:
             raise ValueError('Invalid project filename')
         path = PurePosixPath(name)
-        if path.is_absolute() or any(p in ('', '.', '..') for p in name.split('/')) or path.suffix not in ('.cvc', '.h') + BINARY_SUFFIXES:
+        if path.is_absolute() or any(p in ('', '.', '..') for p in name.split('/')) or not project_path(name):
             raise ValueError('Project files must be relative source or binary paths without traversal')
         if path.suffix in BINARY_SUFFIXES:
             if isinstance(source, str): raise ValueError('Binary files require base64 encoding')
@@ -47,7 +51,7 @@ def read_project(directory):
     files = {}
     for path in sorted(root.rglob('*')):
         if any(part.startswith('.') for part in path.relative_to(root).parts): continue
-        if path.suffix in ('.cvc', '.h') + BINARY_SUFFIXES and path.is_file():
+        if project_path(path.relative_to(root).as_posix()) and path.is_file():
             if not path.resolve().is_relative_to(root):
                 raise ValueError('Project symlink escapes project directory')
             if path.stat().st_size > LIMIT:

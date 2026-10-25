@@ -50,6 +50,29 @@ class WebTests(unittest.TestCase):
         self.assertGreater(result['code_bytes'],8192)
         self.assertEqual([item['size'] for item in result['exports']],[16384,32768,49152])
 
+    def test_cartridge_metadata_banked_rom_and_zip(self):
+        import sys
+        sys.path.insert(0,str(ROOT/'tools'))
+        from project_source import read_project
+        files=read_project(ROOT/'examples/banks')
+        status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,200,body)
+        result=json.loads(body)
+        self.assertEqual(result['cartridge']['web_mapper'],4)
+        self.assertEqual(result['cartridge']['ram_kib'],16)
+        self.assertEqual(result['rom_bytes'],65536)
+        self.assertEqual(result['exports'],[])
+        rom=base64.b64decode(result['rom'])
+        self.assertEqual(rom[32768:32800],(ROOT/'examples/banks/assets/square.bin').read_bytes())
+        status,body=self.request('POST','/api/project-download',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,200,body)
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            self.assertEqual(archive.read('cartridge.json').decode(),files['cartridge.json'])
+        files['cartridge.json']='{"mapper":"sc3000","banks":{"2":"assets/square.bin"}}'
+        status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
+        self.assertEqual(status,422,body)
+        self.assertNotIn('rom',json.loads(body))
+
     def test_diagnostics_no_rom(self):
         status, body = self.request('POST', '/api/compile', json.dumps({'source':'void setup(){noSuchCall();}\nvoid loop(){}'}), {'Content-Type':'application/json'})
         result = json.loads(body)

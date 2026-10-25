@@ -255,6 +255,14 @@ static void zcall(Compiler *c,TSNode n) {
         for(unsigned i=0;i<5;i++){zbyteexpr(c,child(args,i));fputs(" push af\n",c->out);}
         fputs(" pop af\n ld e,a\n pop af\n ld d,a\n pop af\n ld c,a\n pop af\n ld b,a\n pop af\n call cvcc_sprite_regs\n",c->out);return;
     }
+    if(equals(c,fn,"bankRead")) {
+        zexpr(c,child(args,1));
+        fprintf(c->out," ld a,h\n and $3f\n or $80\n ld h,a\n ld a,%u\n ld ($%x),a\n ld l,(hl)\n ld h,0\n",zliteral(c,child(args,0)),cartridge->bank_register);return;
+    }
+    if(equals(c,fn,"vramWriteBank")) {
+        zexpr(c,child(args,0));
+        fprintf(c->out," ld a,%u\n ld ($%x),a\n ld de,%u\n ld bc,%u\n call cvcc_vram_write\n",zliteral(c,child(args,1)),cartridge->bank_register,0x8000+zliteral(c,child(args,2)),zliteral(c,child(args,3)));return;
+    }
     if(equals(c,fn,"controllerRead")) {
         fprintf(c->out," ld a,%u\n call cvcc_controller_port\n",zliteral(c,child(args,0)));return;
     }
@@ -365,11 +373,21 @@ static unsigned zstack(Compiler *c,TSNode n) {
     return peak;
 }
 static int compile_z80(Compiler *c) {
+    /* Track allocation arithmetically: sjasmplus wraps ORG at $10000.
+       A wrapped RAM_END must never make an overflowing program look small. */
+    unsigned ram_bytes=4+8+128; /* counters/flags, VDP registers, sprite shadow */
+    for(unsigned i=0;i<c->count;i++) {
+        Symbol *s=&c->symbols[i];
+        if(!s->constant)ram_bytes+=(unsigned)(s->array?s->size:1)*(s->word?2u:1u);
+    }
+    for(unsigned i=0;i<c->function_count;i++)
+        for(unsigned j=0;j<c->functions[i].arity;j++)ram_bytes+=c->functions[i].params[j].word?2u:1u;
     zlabel=0;c->loop_depth=c->break_depth=0;c->current_function=-1;
     memset(zstack_function,0,sizeof zstack_function);
     unsigned setup_stack=zstack(c,c->setup),loop_stack=zstack(c,c->loop);
     unsigned stack_bytes=32+(setup_stack>loop_stack?setup_stack:loop_stack);
     if(stack_bytes<256)stack_bytes=256;
+    fprintf(c->out,"; Cartridge: %s\nSTACK_TOP EQU $%x\n",cartridge->id,cartridge_ram_end() & 65535);
     fputs("; Original CVCC backend, no CVBasic code or runtime.\n OUTPUT \"program.sg\"\n DEVICE NOSLOT64K\n ORG 0\n jp cvcc_start\n defs $38-$,0\n jp cvcc_irq\n defs $66-$,0\n retn\n INCLUDE \"sg1000.asm\"\ncvcc_setup:\n",c->out);
     for(unsigned i=0;i<c->count;i++) {
         Symbol *s=&c->symbols[i];if(!s->initialized||s->constant)continue;
@@ -389,7 +407,10 @@ static int compile_z80(Compiler *c) {
         zname(c,s);fputs(":\n",c->out);
         for(int j=0;j<s->size;j++)fprintf(c->out," %s %u\n",s->word?"dw":"db",zliteral(c,child(s->value,(unsigned)j)));
     }
-    fputs("ROM_END:\n ASSERT ROM_END <= $8000\n IF $ <= 8192\n defs 8192-$,$ff\n ELSEIF $ <= 16384\n defs 16384-$,$ff\n ELSE\n defs 32768-$,$ff\n ENDIF\nRAM_START EQU $c000\n ORG RAM_START\n",c->out);
+    fprintf(c->out,"ROM_END:\n ASSERT ROM_END <= $%x ; cartridge fixed ROM capacity\n",cartridge->rom_limit);
+    if(cartridge->bank_register)fputs(" defs 32768-$,$ff\n",c->out);
+    else fputs(" IF $ <= 8192\n defs 8192-$,$ff\n ELSEIF $ <= 16384\n defs 16384-$,$ff\n ELSEIF $ <= 32768\n defs 32768-$,$ff\n ELSE\n defs 49152-$,$ff\n ENDIF\n",c->out);
+    fprintf(c->out,"RAM_START EQU $%x\n ORG RAM_START\n",cartridge->ram_start);
     for(unsigned i=0;i<c->count;i++) {
         Symbol *s=&c->symbols[i];if(s->constant)continue;
         zname(c,s);fprintf(c->out," EQU $\n ORG $+%d\n",(s->array?s->size:1)*(s->word?2:1));
@@ -398,7 +419,13 @@ static int compile_z80(Compiler *c) {
         c->current_function=(int)i;
         for(unsigned j=0;j<c->functions[i].arity;j++){Symbol *s=&c->functions[i].params[j];zname(c,s);fprintf(c->out," EQU $\n ORG $+%d\n",s->word?2:1);}
     }
-    fputs("cvcc_vblank EQU $\n ORG $+1\ncvcc_video_mode EQU $\n ORG $+1\ncvcc_flicker_enabled EQU $\n ORG $+1\ncvcc_sprite_rotation EQU $\n ORG $+1\ncvcc_registers EQU $\n ORG $+8\ncvcc_sprites EQU $\n ORG $+128\nRAM_END EQU $\n",c->out);
-    fprintf(c->out,"STACK_BYTES EQU %u\n ASSERT RAM_END+STACK_BYTES <= $c400 ; globals, runtime and worst-case stack must fit 1 KiB\n",stack_bytes);
+    fputs("cvcc_vblank EQU $\n ORG $+1\ncvcc_video_mode EQU $\n ORG $+1\ncvcc_flicker_enabled EQU $\n ORG $+1\ncvcc_sprite_rotation EQU $\n ORG $+1\ncvcc_registers EQU $\n ORG $+8\ncvcc_sprites EQU $\n ORG $+128\n",c->out);
+    fprintf(c->out,"RAM_END EQU RAM_START+%u\n",ram_bytes);
+    fprintf(c->out,"STACK_BYTES EQU %u\nRAM_LIMIT EQU $%x\n ASSERT RAM_END+STACK_BYTES <= RAM_LIMIT ; globals, runtime and worst-case stack must fit physical RAM\n",stack_bytes,cartridge_ram_end());
+    if(cartridge->bank_register) {
+        fputs("; CVCC_DATA_BANKS\n",c->out);
+        for(unsigned bank=2;bank<cartridge_banks;bank++)
+            fprintf(c->out,"; Physical bank %u (empty unless supplied by the project)\n ORG $8000\n defs 16384,$ff\n",bank);
+    }
     return !c->failed;
 }

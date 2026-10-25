@@ -11,7 +11,7 @@ import tempfile
 import threading
 from urllib.parse import quote
 
-from project_source import read_project, validate_files, file_bytes, BINARY_SUFFIXES, LIMIT
+from project_source import read_project, validate_files, file_bytes, BINARY_SUFFIXES, LIMIT, project_path
 
 
 class Conflict(ValueError):
@@ -142,7 +142,7 @@ class WorkspaceStore:
         for item in tree['tree']:
             if not item['path'].startswith(prefix): continue
             name = item['path'][len(prefix):]
-            if any(p.startswith('.') for p in name.split('/')) or Path(name).suffix not in ('.cvc', '.h') + BINARY_SUFFIXES: continue
+            if any(p.startswith('.') for p in name.split('/')) or not project_path(name): continue
             if item['type'] != 'blob' or item['mode'] not in ('100644', '100755'):
                 raise ValueError('Link simbolici e submodule non supportati nei file del progetto.')
             total += item.get('size', 0)

@@ -16,6 +16,7 @@ import time
 from urllib.parse import urlsplit
 from workspace_store import WorkspaceStore, Conflict
 from rom_exports import exports
+from cartridge import profiles
 from project_source import read_project, validate_files, file_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,12 +48,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, {'error': 'Local origin required'})
         route = urlsplit(self.path).path
         if route == '/api/config':
-            examples = [{'id': name, 'files': read_project(ROOT / 'examples' / name)} for name in ('square', 'counter', 'patrol', 'masks', 'logic', 'states', 'functions')]
+            examples = [{'id': name, 'files': read_project(ROOT / 'examples' / name)} for name in ('square', 'counter', 'patrol', 'masks', 'logic', 'states', 'functions', 'banks')]
             if self.server.local_example:
                 examples.append(dict(id=self.server.local_example.stem, files={'main.cvc':self.server.local_example.read_text()}, local=True))
             if self.server.project:
                 examples.append(dict(id=self.server.project.name, files=read_project(self.server.project), local=True))
-            return self.send(200, dict(examples=examples, player_available=all((self.server.player / f).is_file() for f in ('core.js', 'core.wasm'))))
+            return self.send(200, dict(examples=examples, cartridges=profiles(ROOT/'build/cvcc'), player_available=all((self.server.player / f).is_file() for f in ('core.js', 'core.wasm'))))
         files = {'/': ('index.html', 'text/html; charset=utf-8'),
                  '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
                  '/workspace.js': ('workspace.js', 'text/javascript; charset=utf-8'),
@@ -144,8 +145,8 @@ class Handler(BaseHTTPRequestHandler):
                 rom = (out/'program.sg').read_bytes()
                 code_bytes = symbols.get('ROM_END', 0)
                 return finish(200, dict(rom=base64.b64encode(rom).decode(),
-                    exports=exports(rom, code_bytes, backend=metadata["backend"]),
-                    backend=metadata["backend"],
+                    exports=exports(rom, code_bytes, backend=metadata["backend"], cartridge=metadata["cartridge"]),
+                    backend=metadata["backend"], cartridge=metadata["cartridge"], bank_data_bytes=metadata["bank_data_bytes"],
                     basic=(out/'program.bas').read_text() if metadata['backend']=='legacy' else '', assembly=(out/'program.sj.asm').read_text(),
                     log=(out/'build.log').read_text(), elapsed_ms=round((time.perf_counter()-started)*1000),
                     rom_bytes=metadata['rom_bytes'], sha256=metadata['rom_sha256'],

@@ -28,7 +28,9 @@ class NativeBuildTests(unittest.TestCase):
                     self.assertEqual(metadata['backend'], 'z80')
                     self.assertNotIn('CVBasic', metadata['dependencies'])
                     self.assertFalse((dest/'program.bas').exists())
-                    self.assertIn(len(rom), (8192,16384,32768))
+                    profile=metadata['cartridge']
+                    if profile['banked']:self.assertEqual(len(rom),profile['bank_count']*16384)
+                    else:self.assertIn(len(rom), (8192,16384,32768,49152))
                     self.assertEqual(hashlib.sha256(rom).hexdigest(), metadata['rom_sha256'])
                     result = subprocess.run(['sjasmplus','-Wno-fileorg','program.sj.asm'], cwd=dest, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)

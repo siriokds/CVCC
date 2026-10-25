@@ -1,0 +1,2 @@
+# Cartridge assets are raw bytes, including files without a NUL byte.
+*.bin binary

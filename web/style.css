@@ -32,3 +32,10 @@
 @media(max-width:1000px){.workbar{flex-wrap:wrap;height:auto;padding:12px;gap:10px}.work-actions{flex-wrap:wrap}.storage-strip{flex-wrap:wrap;gap:5px}#storage-state{margin-left:0}.storage-strip>span:first-child{max-width:100%}}@media(max-width:640px){.work-actions .subtle,.storage-strip .subtle{display:block}.compare-files,.field-row{grid-template-columns:1fr}.storage-tabs{flex-wrap:wrap}}
 #workspace-dialog select{display:block;width:100%;margin-top:8px;padding:10px;border:1px solid #455261;border-radius:5px;background:var(--bg);color:var(--text);font:12px var(--mono)}
 #storage-state.storage-warning{color:#f4b68e}
+
+.cartridge-settings{margin:0 0 12px;padding:10px 12px;border:1px solid var(--border,#333);border-radius:6px;font-size:12px}
+.cartridge-settings summary{cursor:pointer;color:#d4d8e0}
+.cartridge-settings label{display:block;margin-top:10px;color:#a9b2c2}
+.cartridge-settings label[hidden]{display:none}
+.cartridge-settings select{display:block;width:100%;margin-top:5px;background:#171b23;color:#e4e8ef;border:1px solid #3b4251;border-radius:4px;padding:6px}
+.cartridge-settings p{line-height:1.5;color:#9aa6b9;margin:9px 0 0}
