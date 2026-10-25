@@ -54,6 +54,16 @@ the assembly path, not a CVCC port or gameplay validation. Game source, assets
 and generated ROMs remain outside this repository. Completing this milestone
 does not by itself establish full CVBasic feature parity.
 
+## Future idea: optimization assistant
+
+Deferred beyond the current implementation work: help programmers simplify
+inefficient code and explore loop unrolling, instruction reduction and equivalent
+transformations. Evaluate existing tools before choosing an implementation.
+Show before/after source and assembly, with ROM/RAM and Z80 cycle costs so that
+speed-versus-size tradeoffs are visible. Validate behavior and preserve observable
+I/O, interrupt and frame timing requirements. This is an idea to revisit, not an
+implemented feature or an additional Phase 1 requirement.
+
 ## Development build
 
 Currently tested on macOS. A C11 compiler, Python 3, Git and sjasmplus are needed
