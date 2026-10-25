@@ -3,8 +3,8 @@ from pathlib import Path
 import base64
 import sys
 import unittest
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from rom_exports import exports, HEADER, SIZES
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from toolchain.rom_exports import exports, HEADER, SIZES
 
 
 def image(end):

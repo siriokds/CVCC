@@ -19,6 +19,7 @@ EMU=os.environ.get('CVCC_EMULATOR')
 class NativeEmulatorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        (ROOT/'build').mkdir(parents=True, exist_ok=True)
         cls.log=(ROOT/'build/native-emulator.log').open('w')
         cls.process=subprocess.Popen([EMU,'--headless','--mcp-stdio'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=cls.log,text=True)
         cls.replies=queue.Queue();cls.seq=0
@@ -53,7 +54,7 @@ class NativeEmulatorTests(unittest.TestCase):
 
     def build(self,name):
         directory=ROOT/'build'/('native-'+name)
-        result=subprocess.run([sys.executable,str(ROOT/'tools/build_rom.py'),str(ROOT/'tests/fixtures'/(name+'.cvc')),'--out-dir',str(directory)],capture_output=True,text=True)
+        result=subprocess.run([sys.executable,str(ROOT/'toolchain/build_rom.py'),str(ROOT/'tests/fixtures'/(name+'.cvc')),'--out-dir',str(directory)],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
         self.symbols={k:int(v,16) for k,v in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$',(directory/'program.sym').read_text(),re.M)}
         return directory/'program.sg'

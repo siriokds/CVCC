@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class NativeBuildTests(unittest.TestCase):
     def build(self, source, dest, *options):
-        return subprocess.run([sys.executable, str(ROOT/'tools/build_rom.py'), str(source),
+        return subprocess.run([sys.executable, str(ROOT/'toolchain/build_rom.py'), str(source),
                                '--out-dir', str(dest), *options], capture_output=True, text=True)
 
     def test_all_fixtures_and_public_examples(self):
@@ -40,7 +40,7 @@ class NativeBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);deps=root/'deps';deps.mkdir();dest=root/'out';dest.mkdir()
             for name in ('tree-sitter','tree-sitter-cpp'):
-                (deps/name).symlink_to(ROOT/'.work/deps'/name, target_is_directory=True)
+                (deps/name).symlink_to(ROOT/'compiler/.deps'/name, target_is_directory=True)
             for name in ('program.bas','program.gasm.asm'):(dest/name).write_text('old build')
             result=self.build(ROOT/'examples/square',dest,'--deps',str(deps))
             self.assertEqual(result.returncode,0,result.stderr)
@@ -69,7 +69,7 @@ class NativeBuildTests(unittest.TestCase):
             self.assertIn('RAM_END+STACK_BYTES',result.stderr)
 
     def test_cli_defaults_to_assembly(self):
-        result=subprocess.run([str(ROOT/'build/cvcc'),str(ROOT/'examples/counter/main.cvc')],capture_output=True,text=True)
+        result=subprocess.run([str(ROOT/'compiler/build/cvcc'),str(ROOT/'examples/counter/main.cvc')],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('call cvcc_wait',result.stdout)
         self.assertIn('INCLUDE "sg1000.asm"',result.stdout)

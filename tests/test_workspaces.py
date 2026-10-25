@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from workspace_store import WorkspaceStore, Conflict
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ide.workspace_store import WorkspaceStore, Conflict
 
 FILES = {'main.cvc': 'void setup() {}\nvoid loop() {waitFrame();}\n',
          'data/image.bin': {'base64': base64.b64encode(bytes(range(256))).decode()},
@@ -65,7 +65,7 @@ class LocalTests(unittest.TestCase):
 class GithubTests(unittest.TestCase):
     def setUp(self):
         self.store=WorkspaceStore();self.calls=[];self.head='a'*40
-        self.patch=patch('workspace_store.github_api', side_effect=self.api);self.patch.start();self.addCleanup(self.patch.stop)
+        self.patch=patch('ide.workspace_store.github_api', side_effect=self.api);self.patch.start();self.addCleanup(self.patch.stop)
 
     def api(self, endpoint, payload=None, method=None):
         self.calls.append((endpoint,payload,method))
@@ -114,7 +114,7 @@ class GithubTests(unittest.TestCase):
             if '/refs/heads/' in endpoint:
                 self.assertFalse(payload['force']);raise ValueError('Non-fast-forward')
             return real_api(endpoint,payload,method)
-        with patch('workspace_store.github_api',side_effect=race):
+        with patch('ide.workspace_store.github_api',side_effect=race):
             with self.assertRaises(ValueError): self.store.commit_github(project['id'],project['revision'],{**FILES,'main.cvc':'// edit'},'Change')
         self.assertEqual(self.store.workspaces[project['id']]['revision'],'a'*40)
 

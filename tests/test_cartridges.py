@@ -11,10 +11,10 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT/'tools'))
-from cartridge import load, profiles
-from project_source import read_project
-from rom_exports import exports
+sys.path.insert(0, str(ROOT))
+from toolchain.cartridge import load, profiles
+from toolchain.project_source import read_project
+from toolchain.rom_exports import exports
 
 
 class Cartridges(unittest.TestCase):
@@ -29,11 +29,11 @@ class Cartridges(unittest.TestCase):
     def build(self, mapper, source, **config):
         (self.root/'main.cvc').write_text(source)
         (self.root/'cartridge.json').write_text(json.dumps(dict(mapper=mapper, **config)))
-        return subprocess.run([sys.executable, ROOT/'tools/build_rom.py', self.root,
+        return subprocess.run([sys.executable, ROOT/'toolchain/build_rom.py', self.root,
                                '--out-dir', self.out], capture_output=True, text=True)
 
     def test_ram_and_rom_capacity(self):
-        for profile in profiles(ROOT/'build/cvcc'):
+        for profile in profiles(ROOT/'compiler/build/cvcc'):
             capacity = profile['ram_end']-profile['ram_start']
             # Split arrays because the frontend intentionally limits each to 8192 elements.
             def arrays(size):
@@ -69,7 +69,7 @@ class Cartridges(unittest.TestCase):
         files = read_project(self.root)
         self.assertIn('cartridge.json', files)
         self.assertEqual(base64.b64decode(files['a.bin']['base64']), rom[32768:49152])
-        profile = load(self.root, ROOT/'build/cvcc')[0]
+        profile = load(self.root, ROOT/'compiler/build/cvcc')[0]
         self.assertEqual(exports(rom, 2000, backend='z80', cartridge=profile), [])
 
     def test_invalid_banks_and_ram(self):
@@ -88,7 +88,7 @@ class Cartridges(unittest.TestCase):
             self.assertNotEqual(self.build('asc16l', 'void setup(){'+code+'} void loop(){}').returncode, 0)
         self.assertNotEqual(self.build('sc3000', 'void setup(){bankRead(2,0);} void loop(){}').returncode, 0)
         self.assertEqual(self.build('sc3000', 'void setup(){} void loop(){}').returncode, 0)
-        profile = load(self.root, ROOT/'build/cvcc')[0]
+        profile = load(self.root, ROOT/'compiler/build/cvcc')[0]
         self.assertEqual([x['size'] for x in exports(b'X'+b'\xff'*8191, 1, backend='z80', cartridge=profile)], [8192,16384,32768])
 
     @unittest.skipUnless(os.environ.get('CVCC_WEB_CORE'), 'set CVCC_WEB_CORE to GearSF7000 Web core.js')
@@ -99,7 +99,7 @@ class Cartridges(unittest.TestCase):
             self.assertEqual(self.build('sg1000', f'void setup(){{screenDisable();vdpWrite(7,{color});}} void loop(){{waitFrame();}}').returncode, 0)
             target = self.root/f'color{color}.sg';target.write_bytes((self.out/'program.sg').read_bytes())
             cases.append(dict(path=str(target), mapper=7, ram=16, label=f'color{color}'))
-        for p in profiles(ROOT/'build/cvcc'):
+        for p in profiles(ROOT/'compiler/build/cvcc'):
             for ram in ((8,16) if p['id']=='asc16l' else (None,)):
                 capacity = ram*1024 if ram else p['ram_end']-p['ram_start']
                 declarations, writes, checks = ['uint8_t buffer[16];uint8_t ticks;'], [], []

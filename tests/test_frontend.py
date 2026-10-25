@@ -9,9 +9,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / 'build'
-FRONTEND = BUILD / 'cvcc'
-sys.path.insert(0, str(ROOT / 'tools'))
-from gasm80_to_sjasmplus import adapt
+FRONTEND = ROOT / 'compiler/build/cvcc'
+sys.path.insert(0, str(ROOT))
+from toolchain.gasm80_to_sjasmplus import adapt
 
 
 def command(*args, cwd=ROOT):
@@ -23,6 +23,7 @@ def command(*args, cwd=ROOT):
 
 class FrontendTests(unittest.TestCase):
     def setUp(self):
+        BUILD.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=BUILD)
         self.path = Path(self.temp.name) / 'test.cvc'
 
@@ -254,7 +255,7 @@ class FrontendTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("CVCC_TEST_LEGACY") == "1", "optional CVBasic/Gasm80 reference test")
     def test_sound_rom(self):
         dest=BUILD/'sound'
-        command(sys.executable,ROOT/'tools/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/sound.cvc','--out-dir',dest)
+        command(sys.executable,ROOT/'toolchain/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/sound.cvc','--out-dir',dest)
         command('gasm80',dest/'program.gasm.asm','-o',dest/'reference.sg')
         self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
 
@@ -322,38 +323,39 @@ class FrontendTests(unittest.TestCase):
 class RomTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cvb = ROOT / '.work/deps/CVBasic'
+        BUILD.mkdir(parents=True, exist_ok=True)
+        cvb = ROOT / 'compiler/.deps/CVBasic'
         command('cc', '-O2', *[cvb / (name + '.c') for name in ('cvbasic', 'node', 'driver', 'cpuz80', 'cpu6502', 'cpu9900')], '-o', BUILD / 'reference-cvbasic')
 
     def test_counter_against_handwritten_basic(self):
         dest = BUILD / 'test-counter'
-        command(sys.executable, ROOT / 'tools/build_rom.py', '--backend', 'legacy', ROOT / 'examples/counter/main.cvc', '--out-dir', dest)
-        cvb = ROOT / '.work/deps/CVBasic'
+        command(sys.executable, ROOT / 'toolchain/build_rom.py', '--backend', 'legacy', ROOT / 'examples/counter/main.cvc', '--out-dir', dest)
+        cvb = ROOT / 'compiler/.deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', ROOT / 'tests/fixtures/counter.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
 
     def test_functions_arrays_against_handwritten_basic(self):
         dest = BUILD / 'functions-arrays'
-        command(sys.executable, ROOT / 'tools/build_rom.py', '--backend', 'legacy', ROOT / 'tests/fixtures/functions_arrays.cvc', '--out-dir', dest)
-        cvb = ROOT / '.work/deps/CVBasic'
+        command(sys.executable, ROOT / 'toolchain/build_rom.py', '--backend', 'legacy', ROOT / 'tests/fixtures/functions_arrays.cvc', '--out-dir', dest)
+        cvb = ROOT / 'compiler/.deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', ROOT / 'tests/fixtures/functions_arrays.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
 
     def test_for_bitwise_rom(self):
         dest = BUILD / 'for-bitwise'
-        command(sys.executable, ROOT / 'tools/build_rom.py', '--backend', 'legacy', ROOT / 'tests/fixtures/for_bitwise.cvc', '--out-dir', dest)
+        command(sys.executable, ROOT / 'toolchain/build_rom.py', '--backend', 'legacy', ROOT / 'tests/fixtures/for_bitwise.cvc', '--out-dir', dest)
         # Assemble the same CVBasic lowering with the independent assembler.
-        cvb = ROOT / '.work/deps/CVBasic'
+        cvb = ROOT / 'compiler/.deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', dest / 'program.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
 
     def test_shifts_logic_rom(self):
         dest = BUILD / 'shifts-logic'
-        command(sys.executable, ROOT / 'tools/build_rom.py', '--backend', 'legacy', ROOT / 'tests/fixtures/shifts_logic.cvc', '--out-dir', dest)
-        cvb = ROOT / '.work/deps/CVBasic'
+        command(sys.executable, ROOT / 'toolchain/build_rom.py', '--backend', 'legacy', ROOT / 'tests/fixtures/shifts_logic.cvc', '--out-dir', dest)
+        cvb = ROOT / 'compiler/.deps/CVBasic'
         command(BUILD / 'reference-cvbasic', '--sg1000', dest / 'program.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())
@@ -362,49 +364,49 @@ class RomTests(unittest.TestCase):
         source=(ROOT/'examples/counter/main.cvc').read_text().replace('waitFrame()', 'waitVBlank()')
         path=BUILD/'counter-vblank.cvc';path.write_text(source)
         dest=BUILD/'counter-vblank'
-        command(sys.executable,ROOT/'tools/build_rom.py', '--backend', 'legacy',path,'--out-dir',dest)
+        command(sys.executable,ROOT/'toolchain/build_rom.py', '--backend', 'legacy',path,'--out-dir',dest)
         import hashlib
         self.assertEqual(hashlib.sha256((dest/'program.sg').read_bytes()).hexdigest(),
                          '2f6b8572cb4f2a82383661587be1c5e845be0ecc975dea1455c0f4f1c73c66b8')
 
     def test_do_while_rom(self):
         dest=BUILD/'do-while'
-        command(sys.executable,ROOT/'tools/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/do_while.cvc','--out-dir',dest)
-        cvb=ROOT/'.work/deps/CVBasic'
+        command(sys.executable,ROOT/'toolchain/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/do_while.cvc','--out-dir',dest)
+        cvb=ROOT/'compiler/.deps/CVBasic'
         command(BUILD/'reference-cvbasic','--sg1000',dest/'program.bas',dest/'reference.asm',str(cvb)+'/')
         command('gasm80',dest/'reference.asm','-o',dest/'reference.sg')
         self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
 
     def test_switch_rom(self):
         dest=BUILD/'switch'
-        command(sys.executable,ROOT/'tools/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/switch.cvc','--out-dir',dest)
-        cvb=ROOT/'.work/deps/CVBasic'
+        command(sys.executable,ROOT/'toolchain/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/switch.cvc','--out-dir',dest)
+        cvb=ROOT/'compiler/.deps/CVBasic'
         command(BUILD/'reference-cvbasic','--sg1000',dest/'program.bas',dest/'reference.asm',str(cvb)+'/')
         command('gasm80',dest/'reference.asm','-o',dest/'reference.sg')
         self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
 
     def test_video_vram_rom(self):
         dest=BUILD/'video-vram'
-        command(sys.executable,ROOT/'tools/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/video_vram.cvc','--out-dir',dest)
+        command(sys.executable,ROOT/'toolchain/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/video_vram.cvc','--out-dir',dest)
         command('gasm80',dest/'program.gasm.asm','-o',dest/'reference.sg')
         self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
 
     def test_function_values_rom(self):
         dest=BUILD/'function-values'
-        command(sys.executable,ROOT/'tools/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/function_values.cvc','--out-dir',dest)
+        command(sys.executable,ROOT/'toolchain/build_rom.py', '--backend', 'legacy',ROOT/'tests/fixtures/function_values.cvc','--out-dir',dest)
         command('gasm80',dest/'program.gasm.asm','-o',dest/'reference.sg')
         self.assertEqual((dest/'program.sg').read_bytes(),(dest/'reference.sg').read_bytes())
 
     def test_states_function_exit_has_ret(self):
         dest=BUILD/'states'
-        command(sys.executable,ROOT/'tools/build_rom.py', '--backend', 'legacy',ROOT/'examples/states/main.cvc','--out-dir',dest)
+        command(sys.executable,ROOT/'toolchain/build_rom.py', '--backend', 'legacy',ROOT/'examples/states/main.cvc','--out-dir',dest)
         symbols=dict((key,int(address,16)) for key,address in re.findall(r'^(\S+): EQU 0x([0-9A-F]+)$',(dest/'program.sym').read_text(),re.M))
         rom=(dest/'program.sg').read_bytes()
         self.assertEqual(rom[symbols['CVB_CVCC_BREAK0']],0xC9)  # RET, not sprite data.
 
     def test_happy_face_exact_upstream_rom(self):
         # Upstream artwork stays in ignored build output; nothing is vendored.
-        cvb = ROOT / '.work/deps/CVBasic'
+        cvb = ROOT / 'compiler/.deps/CVBasic'
         original = (cvb / 'examples/happy_face.bas').read_text()
         rows = re.findall(r'BITMAP "([.X]+)"', original)
         self.assertEqual(len(rows), 16)
@@ -415,7 +417,7 @@ class RomTests(unittest.TestCase):
         path = BUILD / 'happy_face.cvc'
         path.write_text(source)
         dest = BUILD / 'test-happy-face'
-        command(sys.executable, ROOT / 'tools/build_rom.py', '--backend', 'legacy', path, '--out-dir', dest)
+        command(sys.executable, ROOT / 'toolchain/build_rom.py', '--backend', 'legacy', path, '--out-dir', dest)
         command(BUILD / 'reference-cvbasic', '--sg1000', cvb / 'examples/happy_face.bas', dest / 'reference.asm', str(cvb) + '/')
         command('gasm80', dest / 'reference.asm', '-o', dest / 'reference.sg')
         self.assertEqual((dest / 'program.sg').read_bytes(), (dest / 'reference.sg').read_bytes())

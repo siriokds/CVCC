@@ -1,8 +1,8 @@
 from pathlib import Path
 import base64
 import sys,tempfile,unittest,subprocess
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from project_source import expand,validate_files,read_project,remap,file_bytes
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from toolchain.project_source import expand,validate_files,read_project,remap,file_bytes
 ROOT=Path(__file__).resolve().parents[1]
 class Projects(unittest.TestCase):
     def setUp(self):
@@ -17,7 +17,7 @@ class Projects(unittest.TestCase):
         source,mapping,inputs=expand(self.root)
         self.assertEqual(source.count('uint8_t x;'),1)
         p=self.write('flat.cvc',source)
-        result=subprocess.run([ROOT/'build/cvcc',p],capture_output=True,text=True)
+        result=subprocess.run([ROOT/'compiler/build/cvcc',p],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
         row=source.splitlines().index('const uint8_t y=3;')+1
         self.assertIn('data/b.h:1:7:',remap(f'{p}:{row}:7: error: invalid',p,mapping))
@@ -45,7 +45,7 @@ class Projects(unittest.TestCase):
         self.assertEqual(file_bytes(inputs['data/sprite.bin']),data)
         self.assertEqual(file_bytes(read_project(self.root)['data/sprite.bin']),data)
         self.assertIn(','.join(map(str,range(16)))+',',source)
-        result=subprocess.run([ROOT/'build/cvcc',self.write('flat.cvc',source)],capture_output=True,text=True)
+        result=subprocess.run([ROOT/'compiler/build/cvcc',self.write('flat.cvc',source)],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(mapping[1],(str((self.root/'data/sprite.h').resolve()),2))
     def test_invalid_binaries(self):
@@ -61,7 +61,7 @@ class Projects(unittest.TestCase):
     def test_header_diagnostic(self):
         self.write('main.cvc','#include "data/bad.h"\nvoid setup(){} void loop(){}')
         self.write('data/bad.h','uint8_t x;\nvoid helper(){ missing=1; }\n')
-        result=subprocess.run([sys.executable,ROOT/'tools/build_rom.py',self.root,'--out-dir',self.root/'out'],capture_output=True,text=True)
+        result=subprocess.run([sys.executable,ROOT/'toolchain/build_rom.py',self.root,'--out-dir',self.root/'out'],capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0)
         self.assertIn('data/bad.h:2:',result.stderr)
         self.assertFalse((self.root/'out/program.sg').exists())

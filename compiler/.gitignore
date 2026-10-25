@@ -1,0 +1,3 @@
+# Local dependency checkouts and generated compiler output.
+/.deps
+/build/

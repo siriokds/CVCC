@@ -19,7 +19,7 @@ class BankedFunctions(unittest.TestCase):
     def build(self, source, mapper='asc16l', **config):
         (self.root/'main.cvc').write_text(source)
         (self.root/'cartridge.json').write_text(json.dumps(dict(mapper=mapper,**config)))
-        return subprocess.run([sys.executable,ROOT/'tools/build_rom.py',self.root,'--out-dir',self.out],capture_output=True,text=True)
+        return subprocess.run([sys.executable,ROOT/'toolchain/build_rom.py',self.root,'--out-dir',self.out],capture_output=True,text=True)
 
     def test_tag_parsing_and_diagnostics(self):
         source='// __bank(99)\n/* __bank(88) */\n__bank(/* page */ 0x03)\nuint16_t f(uint16_t n){return n+1;}\nvoid setup(){f(1);printAt(0,"__bank(77)");}\nvoid loop(){waitFrame();}'
@@ -43,7 +43,7 @@ class BankedFunctions(unittest.TestCase):
         result=self.build('#include "part.h"\nvoid setup(){} void loop(){}')
         self.assertIn('part.h:3:',result.stderr)
         source=self.root/'raw.cvc';source.write_text('__bank(2) void f(){} void setup(){} void loop(){}')
-        result=subprocess.run([ROOT/'build/cvcc','--basic',source],capture_output=True,text=True)
+        result=subprocess.run([ROOT/'compiler/build/cvcc','--basic',source],capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0);self.assertEqual(result.stdout,'')
 
     def test_layout_collision_overflow_and_preservation(self):

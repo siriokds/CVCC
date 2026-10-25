@@ -11,7 +11,7 @@ import tempfile
 import threading
 from urllib.parse import quote
 
-from project_source import read_project, validate_files, file_bytes, BINARY_SUFFIXES, LIMIT, project_path
+from toolchain.project_source import read_project, validate_files, file_bytes, BINARY_SUFFIXES, LIMIT, project_path
 
 
 class Conflict(ValueError):

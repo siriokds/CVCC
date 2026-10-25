@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path, PurePosixPath
 import subprocess
-from project_source import BINARY_SUFFIXES, LIMIT
+from toolchain.project_source import BINARY_SUFFIXES, LIMIT
 
 
 def profiles(frontend):

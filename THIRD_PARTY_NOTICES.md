@@ -13,7 +13,7 @@ BSD-3-Clause license does not replace dependency licenses.
 | Gasm80 | Installed reference assembler for tests only | Consult its upstream `LICENSE.txt` |
 
 Repository URLs and pinned source commits are recorded in
-`dependencies.lock.json`. sjasmplus and Gasm80 are external tools, not vendored
+`compiler/dependencies.lock.json` and `tests/legacy-dependencies.lock.json`. sjasmplus and Gasm80 are external tools, not vendored
 components. The initial experiment used sjasmplus 1.23.1. Each ROM build records
 the assembler version and executable hash in its ignored `build.json`.
 
@@ -31,4 +31,4 @@ the public square example uses an independently specified outline-square bitmap.
 The optional local Web Workbench reads `core.js` and `core.wasm` from the user's
 existing GearSF7000/GearSC3000 Web player build. These artifacts are not part of
 CVCC, are not copied or redistributed here, and retain their upstream terms.
-`web/player.js` is an original adapter to the exported player ABI.
+`ide/web/player.js` is an original adapter to the exported player ABI.

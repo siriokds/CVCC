@@ -52,8 +52,8 @@ class WebTests(unittest.TestCase):
 
     def test_cartridge_metadata_banked_rom_and_zip(self):
         import sys
-        sys.path.insert(0,str(ROOT/'tools'))
-        from project_source import read_project
+        sys.path.insert(0,str(ROOT))
+        from toolchain.project_source import read_project
         files=read_project(ROOT/'examples/banks')
         status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
         self.assertEqual(status,200,body)
@@ -75,8 +75,8 @@ class WebTests(unittest.TestCase):
 
     def test_banked_function_project(self):
         import sys
-        sys.path.insert(0,str(ROOT/'tools'))
-        from project_source import read_project
+        sys.path.insert(0,str(ROOT))
+        from toolchain.project_source import read_project
         files=read_project(ROOT/'examples/banked-functions')
         status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
         self.assertEqual(status,200,body)
@@ -113,8 +113,8 @@ class WebTests(unittest.TestCase):
 
     def test_binary_compile_and_zip(self):
         import sys
-        sys.path.insert(0,str(ROOT/'tools'))
-        from project_source import read_project
+        sys.path.insert(0,str(ROOT))
+        from toolchain.project_source import read_project
         files=read_project(ROOT/'examples/functions')
         status,body=self.request('POST','/api/compile',json.dumps({'files':files}),{'Content-Type':'application/json'})
         self.assertEqual(status,200,body)
