@@ -1,0 +1,29 @@
+# Internal documents and handoffs (local only)
+/local-docs/
+
+# Disposable experiments and temporary files
+/scratch/
+/tmp/
+/temp/
+/test-output/
+
+# Generated build artifacts
+/build/
+/dist/
+/out/
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local operating system files
+.DS_Store
+Thumbs.db
+
+# Local secrets
+.env
+.env.*
+!.env.example
